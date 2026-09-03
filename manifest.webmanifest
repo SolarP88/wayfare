@@ -1,0 +1,11 @@
+{
+  "name": "wayfare 旅行記帳",
+  "short_name": "記帳",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#0f1115",
+  "theme_color": "#0f1115",
+  "lang": "zh-Hant",
+  "description": "旅行收據記帳 —— 拍照辨識、現金錢包、匯出 Excel。資料只存在自己手機裡。"
+}

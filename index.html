@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<title>旅行記帳</title>
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+/* ---------------------------------------------------------------------------
+   §14 視覺規範。三件事是北海道 12 月特有的，不是「好看」的問題：
+     · 戴手套 → 觸控目標 ≥ 48px，不做小圖示、不做密集列表按鈕
+     · 戶外看不清（雪地反光、下午 4 點天黑）→ 高對比、大字級、深淺色都要能看
+     · 單手操作 → 主要按鈕放下半部拇指區，不放右上角
+   另外：金額用等寬數字避免跳動；動畫最少（省電，§16 第 12 條）
+--------------------------------------------------------------------------- */
+:root{
+  --bg:#f6f7f9; --card:#fff; --ink:#11151c; --muted:#5b6473; --line:#dfe3e9;
+  --accent:#2563eb; --good:#0a7f43; --warn:#b45309; --bad:#c02626;
+  --tap:52px;                      /* 手套友善的最小觸控高度 */
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0f1115; --card:#171b22; --ink:#f2f4f8; --muted:#a3adbb; --line:#2a313c;
+    --accent:#5b9dff; --good:#3ddc97; --warn:#f5b142; --bad:#ff6b6b;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","PingFang TC",sans-serif;
+  -webkit-text-size-adjust:100%;
+  padding-bottom:calc(var(--tap) + 28px + env(safe-area-inset-bottom));
+}
+/* 等寬數字：金額跳動很難看，也容易看錯位數 */
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+
+header{
+  position:sticky;top:0;z-index:5;background:var(--bg);
+  padding:14px 16px 8px;border-bottom:1px solid var(--line);
+}
+h1{margin:0;font-size:19px;letter-spacing:.02em}
+main{padding:14px 16px 24px;max-width:720px;margin:0 auto}
+section[hidden]{display:none!important}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin:0 0 12px}
+.row{display:flex;gap:12px;align-items:center;justify-content:space-between}
+.stack{display:flex;flex-direction:column;gap:10px}
+.muted{color:var(--muted);font-size:13px}
+.big{font-size:34px;font-weight:700;letter-spacing:-.02em}
+.mid{font-size:22px;font-weight:650}
+.sub{font-size:14px;color:var(--muted)}
+.warn{color:var(--warn)} .bad{color:var(--bad)} .good{color:var(--good)}
+
+/* 觸控目標一律 ≥ 52px，不做小圖示按鈕 */
+button,select,input,textarea{font:inherit;color:inherit}
+.btn{
+  min-height:var(--tap);padding:0 18px;border-radius:14px;border:1px solid var(--line);
+  background:var(--card);color:var(--ink);font-weight:600;cursor:pointer;
+}
+.btn.primary{background:var(--accent);border-color:transparent;color:#fff}
+.btn.wide{width:100%}
+.btn.danger{color:var(--bad)}
+.btn:active{opacity:.85}          /* 動畫最少：只做按下的回饋 */
+
+.field{display:flex;flex-direction:column;gap:6px;margin:0 0 14px}
+.field label{font-size:14px;color:var(--muted)}
+.field input,.field select,.field textarea{
+  min-height:var(--tap);padding:10px 12px;border-radius:12px;
+  border:1px solid var(--line);background:var(--bg);
+}
+.field textarea{min-height:96px;line-height:1.5}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+/* 快速記帳的金額鍵：大方塊，戴手套按得到 */
+.quick{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.quick .btn{min-height:64px;font-size:20px}
+
+.list{list-style:none;margin:0;padding:0}
+.item{
+  display:flex;gap:12px;align-items:center;justify-content:space-between;
+  min-height:var(--tap);padding:14px 0;border-bottom:1px solid var(--line);cursor:pointer;
+}
+.item:last-child{border-bottom:0}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--bad);flex:0 0 auto}
+
+.bar{height:10px;border-radius:6px;background:var(--line);overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--accent)}
+.bar.over>i{background:var(--bad)}
+
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{
+  min-height:44px;padding:0 14px;border-radius:12px;border:1px solid var(--line);
+  background:var(--card);display:inline-flex;align-items:center;cursor:pointer;font-size:14px;
+}
+.chip[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:transparent}
+
+/* 下方 Tab bar：主要操作在拇指區（§14 單手操作） */
+nav{
+  position:fixed;left:0;right:0;bottom:0;z-index:10;
+  display:grid;grid-template-columns:repeat(6,1fr);
+  background:var(--card);border-top:1px solid var(--line);
+  padding-bottom:env(safe-area-inset-bottom);
+}
+nav button{
+  min-height:var(--tap);border:0;background:transparent;color:var(--muted);
+  font-size:12px;font-weight:600;cursor:pointer;padding:6px 2px;
+}
+nav button[aria-current="true"]{color:var(--accent)}
+
+dialog{
+  border:0;border-radius:18px;padding:0;background:var(--card);color:var(--ink);
+  width:min(92vw,560px);
+}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+.dlg-body{padding:18px;max-height:76vh;overflow:auto}
+.dlg-foot{display:flex;gap:10px;padding:14px 18px;border-top:1px solid var(--line)}
+.dlg-foot .btn{flex:1}
+
+.banner{padding:12px 14px;border-radius:12px;margin:0 0 12px;font-size:14px}
+.banner.bad{background:color-mix(in srgb,var(--bad) 14%,transparent);color:var(--bad)}
+.banner.warn{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.banner.info{background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}
+
+img.shot{width:100%;border-radius:12px;border:1px solid var(--line);margin-top:10px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:8px 4px;text-align:left;border-bottom:1px solid var(--line)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="title">旅行記帳</h1>
+  <div class="muted" id="subtitle">載入中…</div>
+</header>
+
+<main>
+  <div id="banners"></div>
+
+  <!-- 首頁 ------------------------------------------------------------ -->
+  <section id="tab-home">
+    <div class="card">
+      <div class="muted">現金錢包</div>
+      <div class="row">
+        <div class="big num" id="cash">—</div>
+        <select id="cashPayer" style="min-height:44px;border-radius:12px;border:1px solid var(--line);background:var(--bg);padding:0 10px"></select>
+      </div>
+      <div class="sub" id="cashHint"></div>
+      <div class="row" style="margin-top:12px;gap:10px">
+        <button class="btn" id="btnTopup" style="flex:1">補充現金</button>
+        <button class="btn" id="btnCorrect" style="flex:1">校正餘額</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="grid2">
+        <div><div class="muted">今日支出</div><div class="mid num" id="today">—</div></div>
+        <div><div class="muted">旅程累計</div><div class="mid num" id="total">—</div></div>
+      </div>
+      <div style="margin-top:14px">
+        <div class="row"><span class="muted">預算進度</span><span class="sub num" id="budgetPct">—</span></div>
+        <div class="bar" id="budgetBar"><i style="width:0"></i></div>
+        <div class="sub" id="budgetHint"></div>
+      </div>
+      <div class="sub" style="margin-top:10px" id="preTrip"></div>
+    </div>
+
+    <div class="card">
+      <div class="row"><strong>今日每一筆</strong><span class="sub" id="todayCount"></span></div>
+      <ul class="list" id="todayList"></ul>
+    </div>
+  </section>
+
+  <!-- 紀錄 ------------------------------------------------------------ -->
+  <section id="tab-records" hidden>
+    <div class="card">
+      <div class="field" style="margin:0">
+        <input id="search" placeholder="搜尋店名、品項、備註…" autocomplete="off">
+      </div>
+      <div class="chips" style="margin-top:12px" id="filters"></div>
+    </div>
+    <div class="card">
+      <div class="row"><strong id="recCount">全部紀錄</strong>
+        <button class="btn" id="btnTrash" style="min-height:44px;padding:0 12px">最近刪除</button></div>
+      <ul class="list" id="recList"></ul>
+    </div>
+  </section>
+
+  <!-- 掃描 ------------------------------------------------------------ -->
+  <section id="tab-scan" hidden>
+    <div class="card">
+      <div class="row"><strong>辨識佇列</strong><span class="sub" id="qStat">閒置</span></div>
+      <ul class="list" id="qList"></ul>
+      <button class="btn wide" id="btnRetryAll" style="margin-top:10px" hidden>全部重試</button>
+    </div>
+
+    <div class="card">
+      <strong>三秒快速記帳</strong>
+      <div class="sub" style="margin:6px 0 12px">販賣機、置物櫃、公車、賽錢——沒收據的用這個</div>
+      <div class="quick" id="quickAmounts"></div>
+      <div class="field" style="margin-top:12px">
+        <label>其他金額</label>
+        <input id="quickCustom" type="number" inputmode="numeric" placeholder="金額">
+      </div>
+      <div class="chips" id="quickCats"></div>
+      <button class="btn primary wide" id="btnQuickSave" style="margin-top:12px">記一筆</button>
+    </div>
+
+    <!-- 拍照按鈕放最下面：單手操作，拇指區（§14） -->
+    <input type="file" id="shot" accept="image/*" capture="environment" multiple hidden>
+    <button class="btn primary wide" id="btnShoot" style="min-height:64px;font-size:18px">📷 拍收據（可連拍）</button>
+    <div class="sub" style="text-align:center;margin-top:8px">拍完立刻回到相機，辨識在背景跑</div>
+  </section>
+
+  <!-- 手動輸入 -------------------------------------------------------- -->
+  <section id="tab-manual" hidden>
+    <div class="card">
+      <strong>手動輸入</strong>
+      <div class="sub" style="margin:6px 0 14px">機票、住宿、租車、周遊券，或補漏</div>
+      <div id="manualForm"></div>
+      <button class="btn primary wide" id="btnManualSave">儲存</button>
+    </div>
+  </section>
+
+  <!-- 統計 ------------------------------------------------------------ -->
+  <section id="tab-stats" hidden>
+    <div class="card"><strong>每日趨勢</strong><div id="chartDaily"></div></div>
+    <div class="card"><strong>分類佔比</strong><div id="chartCat"></div></div>
+    <div class="card"><strong>支付方式</strong><div id="chartPay"></div></div>
+    <div class="card"><strong>城市</strong><div id="chartCity"></div></div>
+    <div class="card"><strong>付款人</strong><div id="chartPayer"></div></div>
+    <div class="card"><strong>待退稅累計</strong><div class="big num" id="refundTotal">—</div>
+      <div class="sub">這是<strong>應收</strong>，不是已經省下來的錢</div></div>
+    <div class="card"><strong>TOP 10</strong><div id="topList"></div></div>
+  </section>
+
+  <!-- 設定 ------------------------------------------------------------ -->
+  <section id="tab-settings" hidden>
+    <div class="card"><strong>基本</strong><div id="settingsBasic"></div></div>
+    <div class="card"><strong>匯率</strong><div id="settingsFx"></div>
+      <button class="btn wide" id="btnRefRate">更新參考匯率</button>
+      <div class="sub" id="refRateOut" style="margin-top:8px">
+        只是參考值，不會自動改你的設定——換錢的成本只有你知道
+      </div>
+    </div>
+    <div class="card"><strong>付款人與現金</strong><div id="settingsPayers"></div></div>
+    <div class="card"><strong>行程</strong><div id="settingsSchedule"></div></div>
+    <div class="card"><strong>API key 與用量</strong><div id="settingsApi"></div></div>
+    <div class="card"><strong>出發前檢查清單</strong><ul class="list" id="preflight"></ul></div>
+    <div class="card"><strong>一鍵健檢</strong><div id="healthOut"></div>
+      <button class="btn wide" id="btnHealth" style="margin-top:10px">跑一次</button></div>
+    <div class="card"><strong>匯出與備份</strong>
+      <div class="stack" style="margin-top:10px">
+        <button class="btn primary wide" id="btnXlsx">匯出 Excel</button>
+        <button class="btn wide" id="btnBackup">備份（含照片）</button>
+        <button class="btn wide" id="btnRestore">還原備份</button>
+        <input type="file" id="restoreFile" accept="application/json" hidden>
+      </div>
+      <div class="sub" style="margin-top:10px" id="exportOut">
+        資料只在這支手機裡。iOS 對長期沒用的網站會清資料，回國後盡快匯出。
+      </div>
+    </div>
+  </section>
+</main>
+
+<nav id="tabs">
+  <button data-tab="home" aria-current="true">首頁</button>
+  <button data-tab="records">紀錄</button>
+  <button data-tab="scan">掃描</button>
+  <button data-tab="manual">手動</button>
+  <button data-tab="stats">統計</button>
+  <button data-tab="settings">設定</button>
+</nav>
+
+<dialog id="dlg">
+  <div class="dlg-body" id="dlgBody"></div>
+  <div class="dlg-foot" id="dlgFoot"></div>
+</dialog>
+
+<!-- SheetJS 只用在「匯出 Excel」。載不到就退回 CSV，不會讓整個 App 掛掉 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script type="module" src="src/app.js"></script>
+</body>
+</html>
