@@ -3,63 +3,81 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0f1115">
+<meta name="theme-color" content="#F6F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#131519" media="(prefers-color-scheme: dark)">
 <title>旅行記帳</title>
 <link rel="manifest" href="manifest.webmanifest">
 <style>
 /* ---------------------------------------------------------------------------
    §14 視覺規範。三件事是北海道 12 月特有的，不是「好看」的問題：
-     · 戴手套 → 觸控目標 ≥ 48px，不做小圖示、不做密集列表按鈕
+     · 戴手套 → 觸控目標 ≥ 52px，不做小圖示、不做密集列表按鈕
      · 戶外看不清（雪地反光、下午 4 點天黑）→ 高對比、大字級、深淺色都要能看
      · 單手操作 → 主要按鈕放下半部拇指區，不放右上角
    另外：金額用等寬數字避免跳動；動畫最少（省電，§16 第 12 條）
+
+   2026-09-03 換皮（霧藍）。取參考截圖的形（卡片層次、圓角、日期分組、甜甜圈），
+   **不取它的字級與對比**——參考圖是東京春天，我們是北海道 12 月。
+   正文最小 14px；灰字 #616A78（淺底 5.6:1）／#9DA6B4（深底 7.1:1）。
 --------------------------------------------------------------------------- */
 :root{
-  --bg:#f6f7f9; --card:#fff; --ink:#11151c; --muted:#5b6473; --line:#dfe3e9;
-  --accent:#2563eb; --good:#0a7f43; --warn:#b45309; --bad:#c02626;
+  --bg:#F6F4F1; --card:#FFFFFF; --sunk:#F1EEEA;
+  --ink:#20242B; --ink2:#3D444F; --muted:#616A78; --line:#E4E0DB;
+  --accent:#527A96; --accent-soft:#E2EAF0; --accent-ink:#fff;
+  --good:#2F7A55; --warn:#9A6412; --bad:#A8382F;
   --tap:52px;                      /* 手套友善的最小觸控高度 */
+  --radius:18px;
+  --shadow:0 1px 2px rgba(23,25,30,.04), 0 6px 18px rgba(23,25,30,.06);
 }
 @media (prefers-color-scheme: dark){
   :root{
-    --bg:#0f1115; --card:#171b22; --ink:#f2f4f8; --muted:#a3adbb; --line:#2a313c;
-    --accent:#5b9dff; --good:#3ddc97; --warn:#f5b142; --bad:#ff6b6b;
+    --bg:#131519; --card:#1C1F25; --sunk:#22262D;
+    --ink:#F1F2F5; --ink2:#D3D7DE; --muted:#9DA6B4; --line:#2C313A;
+    --accent:#86B2CF; --accent-soft:#1F2A33; --accent-ink:#131519;
+    --good:#5FC48D; --warn:#E0A94A; --bad:#F08278;
+    --shadow:0 1px 2px rgba(0,0,0,.25), 0 6px 18px rgba(0,0,0,.22);
   }
 }
+/* 分類色票：跟主色分開，換主色不影響辨識 */
+.c-food{--c:#C97F5E}.c-tran{--c:#6F93B5}.c-shop{--c:#B98098}.c-tick{--c:#9887BC}
+.c-stay{--c:#6FA394}.c-med{--c:#C08181}.c-etc{--c:#8C95A3}
+
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
 body{
   background:var(--bg); color:var(--ink);
-  font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","PingFang TC",sans-serif;
+  font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","PingFang TC",sans-serif;
   -webkit-text-size-adjust:100%;
-  padding-bottom:calc(var(--tap) + 28px + env(safe-area-inset-bottom));
+  padding-bottom:calc(var(--tap) + 34px + env(safe-area-inset-bottom));
 }
 /* 等寬數字：金額跳動很難看，也容易看錯位數 */
 .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
 
 header{
   position:sticky;top:0;z-index:5;background:var(--bg);
-  padding:14px 16px 8px;border-bottom:1px solid var(--line);
+  padding:14px 16px 10px;border-bottom:1px solid var(--line);
 }
-h1{margin:0;font-size:19px;letter-spacing:.02em}
+h1{margin:0;font-size:20px;letter-spacing:.01em}
 main{padding:14px 16px 24px;max-width:720px;margin:0 auto}
 section[hidden]{display:none!important}
 
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+      padding:15px;box-shadow:var(--shadow);margin:0 0 12px}
 .row{display:flex;gap:12px;align-items:center;justify-content:space-between}
 .stack{display:flex;flex-direction:column;gap:10px}
-.muted{color:var(--muted);font-size:13px}
-.big{font-size:34px;font-weight:700;letter-spacing:-.02em}
-.mid{font-size:22px;font-weight:650}
+.muted{color:var(--muted);font-size:14px}
+.big{font-size:32px;font-weight:700;letter-spacing:-.02em}
+.mid{font-size:23px;font-weight:650}
 .sub{font-size:14px;color:var(--muted)}
 .warn{color:var(--warn)} .bad{color:var(--bad)} .good{color:var(--good)}
+.sect{font-size:14px;color:var(--muted);font-weight:600;margin:16px 2px 9px}
 
 /* 觸控目標一律 ≥ 52px，不做小圖示按鈕 */
 button,select,input,textarea{font:inherit;color:inherit}
 .btn{
-  min-height:var(--tap);padding:0 18px;border-radius:14px;border:1px solid var(--line);
+  min-height:var(--tap);padding:0 18px;border-radius:15px;border:1px solid var(--line);
   background:var(--card);color:var(--ink);font-weight:600;cursor:pointer;
 }
-.btn.primary{background:var(--accent);border-color:transparent;color:#fff}
+.btn.primary{background:var(--accent);border-color:transparent;color:var(--accent-ink)}
 .btn.wide{width:100%}
 .btn.danger{color:var(--bad)}
 .btn:active{opacity:.85}          /* 動畫最少：只做按下的回饋 */
@@ -67,11 +85,23 @@ button,select,input,textarea{font:inherit;color:inherit}
 .field{display:flex;flex-direction:column;gap:6px;margin:0 0 14px}
 .field label{font-size:14px;color:var(--muted)}
 .field input,.field select,.field textarea{
-  min-height:var(--tap);padding:10px 12px;border-radius:12px;
-  border:1px solid var(--line);background:var(--bg);
+  min-height:var(--tap);padding:10px 12px;border-radius:13px;
+  border:1px solid var(--line);background:var(--sunk);
 }
 .field textarea{min-height:96px;line-height:1.5}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+/* 首頁 hero 2×2 */
+.hero{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin:0 0 14px}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+      padding:13px 14px 14px;box-shadow:var(--shadow)}
+.tile .top{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.tile .ic{width:26px;height:26px;border-radius:9px;background:var(--accent-soft);
+          display:grid;place-items:center;font-size:14px;flex:0 0 auto}
+.tile .lb{font-size:13.5px;color:var(--muted);font-weight:600}
+.tile .v{font-size:25px;font-weight:700;letter-spacing:-.02em;line-height:1.15}
+.tile .v.sm{font-size:22px}
+.tile .s{font-size:13px;color:var(--muted);margin-top:3px}
 
 /* 快速記帳的金額鍵：大方塊，戴手套按得到 */
 .quick{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
@@ -85,16 +115,59 @@ button,select,input,textarea{font:inherit;color:inherit}
 .item:last-child{border-bottom:0}
 .dot{width:10px;height:10px;border-radius:50%;background:var(--bad);flex:0 0 auto}
 
-.bar{height:10px;border-radius:6px;background:var(--line);overflow:hidden}
-.bar>i{display:block;height:100%;background:var(--accent)}
+/* 一筆紀錄：左圓＝類別圖示（2026-09-03 她決定不放付款人頭像） */
+.rec{display:flex;gap:11px;align-items:center;padding:11px 0;
+     border-bottom:1px solid var(--line);min-height:var(--tap);cursor:pointer}
+.rec:last-child{border-bottom:0}
+.av{width:38px;height:38px;border-radius:12px;flex:0 0 auto;display:grid;place-items:center;
+    font-size:16px;background:color-mix(in srgb,var(--c,#8C95A3) 16%,transparent)}
+.rec .mid2{flex:1;min-width:0}
+.rec .t{font-size:15.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta{display:flex;gap:7px;align-items:center;margin-top:4px;flex-wrap:wrap}
+.tag{font-size:12.5px;padding:2px 8px;border-radius:7px;font-weight:600;
+     color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent)}
+.dim{font-size:13px;color:var(--muted)}
+.amt{text-align:right;flex:0 0 auto}
+.amt .a{font-size:16.5px;font-weight:700}
+.amt .b{font-size:13px;color:var(--muted);margin-top:2px}
+
+/* 分段切換（按日期／按類別） */
+.seg{display:flex;background:var(--sunk);border-radius:15px;padding:4px;gap:4px;margin:0 0 13px}
+.seg button{flex:1;min-height:46px;border:0;border-radius:12px;background:transparent;
+            font:inherit;font-size:15px;font-weight:600;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
+
+/* 分組標頭 */
+.dayhd{display:flex;justify-content:space-between;align-items:baseline;margin:16px 2px 8px}
+.dayhd .d{font-size:15px;font-weight:700}
+.dayhd .s{font-size:13.5px;color:var(--muted)}
+
+/* 甜甜圈 */
+.donut{display:flex;gap:12px;align-items:center}
+.donut svg{flex:0 0 auto}
+.lg{flex:1;min-width:0}
+.lgr{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:14.5px}
+.lgr .k{width:10px;height:10px;border-radius:50%;flex:0 0 auto}
+.lgr .n{flex:1;min-width:46px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lgr .p{color:var(--muted);font-size:13.5px;width:44px;text-align:right;flex:0 0 auto}
+.lgr .v{font-weight:650;width:78px;text-align:right;flex:0 0 auto}
+
+/* 排行 */
+.rank{display:flex;gap:11px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.rank:last-child{border-bottom:0}
+.rk{width:24px;height:24px;border-radius:8px;background:var(--sunk);color:var(--muted);
+    display:grid;place-items:center;font-size:13px;font-weight:700;flex:0 0 auto}
+
+.bar{height:9px;border-radius:5px;background:var(--sunk);overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--accent);border-radius:5px}
 .bar.over>i{background:var(--bad)}
 
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chip{
-  min-height:44px;padding:0 14px;border-radius:12px;border:1px solid var(--line);
-  background:var(--card);display:inline-flex;align-items:center;cursor:pointer;font-size:14px;
+  min-height:46px;padding:0 14px;border-radius:13px;border:1px solid var(--line);
+  background:var(--card);display:inline-flex;align-items:center;cursor:pointer;font-size:14.5px;
 }
-.chip[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:transparent}
+.chip[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
 
 /* 下方 Tab bar：主要操作在拇指區（§14 單手操作） */
 nav{
@@ -104,27 +177,29 @@ nav{
   padding-bottom:env(safe-area-inset-bottom);
 }
 nav button{
-  min-height:var(--tap);border:0;background:transparent;color:var(--muted);
-  font-size:12px;font-weight:600;cursor:pointer;padding:6px 2px;
+  min-height:58px;border:0;background:transparent;color:var(--muted);
+  font-size:11.5px;font-weight:600;cursor:pointer;padding:6px 2px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
 }
+nav button b{font-size:17px;font-weight:400;line-height:1}
 nav button[aria-current="true"]{color:var(--accent)}
 
 dialog{
-  border:0;border-radius:18px;padding:0;background:var(--card);color:var(--ink);
-  width:min(92vw,560px);
+  border:0;border-radius:20px;padding:0;background:var(--card);color:var(--ink);
+  width:min(92vw,560px);box-shadow:var(--shadow);
 }
 dialog::backdrop{background:rgba(0,0,0,.5)}
 .dlg-body{padding:18px;max-height:76vh;overflow:auto}
 .dlg-foot{display:flex;gap:10px;padding:14px 18px;border-top:1px solid var(--line)}
 .dlg-foot .btn{flex:1}
 
-.banner{padding:12px 14px;border-radius:12px;margin:0 0 12px;font-size:14px}
+.banner{padding:12px 14px;border-radius:13px;margin:0 0 12px;font-size:14.5px}
 .banner.bad{background:color-mix(in srgb,var(--bad) 14%,transparent);color:var(--bad)}
 .banner.warn{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
-.banner.info{background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}
+.banner.info{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
 
-img.shot{width:100%;border-radius:12px;border:1px solid var(--line);margin-top:10px}
-table{width:100%;border-collapse:collapse;font-size:14px}
+img.shot{width:100%;border-radius:13px;border:1px solid var(--line);margin-top:10px}
+table{width:100%;border-collapse:collapse;font-size:14.5px}
 td,th{padding:8px 4px;text-align:left;border-bottom:1px solid var(--line)}
 td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 </style>
@@ -141,12 +216,37 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 
   <!-- 首頁 ------------------------------------------------------------ -->
   <section id="tab-home">
-    <div class="card">
-      <div class="muted">現金錢包</div>
-      <div class="row">
-        <div class="big num" id="cash">—</div>
-        <select id="cashPayer" style="min-height:44px;border-radius:12px;border:1px solid var(--line);background:var(--bg);padding:0 10px"></select>
+    <!-- hero 2×2：一眼看到四個數字，不用捲 -->
+    <div class="hero">
+      <div class="tile">
+        <div class="top"><span class="ic">📅</span><span class="lb">今日支出</span></div>
+        <div class="v num" id="today">—</div>
+        <div class="s num" id="todaySub"></div>
       </div>
+      <div class="tile">
+        <div class="top"><span class="ic">📊</span><span class="lb">旅程累計</span></div>
+        <div class="v num" id="total">—</div>
+        <div class="s num" id="preTrip"></div>
+      </div>
+      <div class="tile">
+        <div class="top"><span class="ic">🎯</span><span class="lb">預算進度</span></div>
+        <div class="v sm num" id="budgetPct">—</div>
+        <div class="bar" id="budgetBar" style="margin-top:9px"><i style="width:0"></i></div>
+        <div class="s num" id="budgetHint"></div>
+      </div>
+      <div class="tile">
+        <div class="top"><span class="ic">🗓️</span><span class="lb">旅程天數</span></div>
+        <div class="v" id="dayN">—</div>
+        <div class="s" id="dayNSub"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div class="muted">現金錢包</div>
+        <select id="cashPayer" style="min-height:46px;border-radius:13px;border:1px solid var(--line);background:var(--sunk);padding:0 10px"></select>
+      </div>
+      <div class="big num" id="cash" style="margin-top:6px">—</div>
       <div class="sub" id="cashHint"></div>
       <div class="row" style="margin-top:12px;gap:10px">
         <button class="btn" id="btnTopup" style="flex:1">補充現金</button>
@@ -154,23 +254,11 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       </div>
     </div>
 
-    <div class="card">
-      <div class="grid2">
-        <div><div class="muted">今日支出</div><div class="mid num" id="today">—</div></div>
-        <div><div class="muted">旅程累計</div><div class="mid num" id="total">—</div></div>
-      </div>
-      <div style="margin-top:14px">
-        <div class="row"><span class="muted">預算進度</span><span class="sub num" id="budgetPct">—</span></div>
-        <div class="bar" id="budgetBar"><i style="width:0"></i></div>
-        <div class="sub" id="budgetHint"></div>
-      </div>
-      <div class="sub" style="margin-top:10px" id="preTrip"></div>
+    <div class="row" style="margin:16px 2px 9px">
+      <span class="sect" style="margin:0">今日花費</span>
+      <span class="sub" id="todayCount"></span>
     </div>
-
-    <div class="card">
-      <div class="row"><strong>今日每一筆</strong><span class="sub" id="todayCount"></span></div>
-      <ul class="list" id="todayList"></ul>
-    </div>
+    <div class="card" style="padding:4px 15px"><ul class="list" id="todayList"></ul></div>
   </section>
 
   <!-- 紀錄 ------------------------------------------------------------ -->
@@ -181,11 +269,25 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       </div>
       <div class="chips" style="margin-top:12px" id="filters"></div>
     </div>
-    <div class="card">
-      <div class="row"><strong id="recCount">全部紀錄</strong>
-        <button class="btn" id="btnTrash" style="min-height:44px;padding:0 12px">最近刪除</button></div>
-      <ul class="list" id="recList"></ul>
+
+    <div class="card" style="padding:14px">
+      <div class="row">
+        <span class="sub">現場累計</span>
+        <span class="mid num" id="recTotal">—</span>
+      </div>
     </div>
+
+    <!-- 按日期／按類別（參考截圖的分段切換） -->
+    <div class="seg" id="recMode">
+      <button data-mode="date" aria-pressed="true">按日期</button>
+      <button data-mode="cat" aria-pressed="false">按類別</button>
+    </div>
+
+    <div class="row" style="margin:0 2px 6px">
+      <strong id="recCount">全部紀錄</strong>
+      <button class="btn" id="btnTrash" style="min-height:46px;padding:0 12px">最近刪除</button>
+    </div>
+    <div id="recGroups"></div>
   </section>
 
   <!-- 掃描 ------------------------------------------------------------ -->
@@ -226,14 +328,15 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 
   <!-- 統計 ------------------------------------------------------------ -->
   <section id="tab-stats" hidden>
-    <div class="card"><strong>每日趨勢</strong><div id="chartDaily"></div></div>
-    <div class="card"><strong>分類佔比</strong><div id="chartCat"></div></div>
-    <div class="card"><strong>支付方式</strong><div id="chartPay"></div></div>
-    <div class="card"><strong>城市</strong><div id="chartCity"></div></div>
-    <div class="card"><strong>付款人</strong><div id="chartPayer"></div></div>
-    <div class="card"><strong>待退稅累計</strong><div class="big num" id="refundTotal">—</div>
+    <div class="card"><div class="sect" style="margin:0 0 12px">分類支出</div><div id="chartCat"></div></div>
+    <div class="card"><div class="sect" style="margin:0 0 12px">支付方式</div><div id="chartPay"></div></div>
+    <div class="card"><div class="sect" style="margin:0 0 12px">每日趨勢</div><div id="chartDaily"></div></div>
+    <div class="card"><div class="sect" style="margin:0 0 12px">城市</div><div id="chartCity"></div></div>
+    <div class="card"><div class="sect" style="margin:0 0 12px">付款人</div><div id="chartPayer"></div></div>
+    <div class="card"><div class="sect" style="margin:0 0 6px">待退稅累計</div>
+      <div class="big num" id="refundTotal">—</div>
       <div class="sub">這是<strong>應收</strong>，不是已經省下來的錢</div></div>
-    <div class="card"><strong>TOP 10</strong><div id="topList"></div></div>
+    <div class="card"><div class="sect" style="margin:0 0 6px">花費前十名</div><div id="topList"></div></div>
   </section>
 
   <!-- 設定 ------------------------------------------------------------ -->
@@ -266,12 +369,12 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 </main>
 
 <nav id="tabs">
-  <button data-tab="home" aria-current="true">首頁</button>
-  <button data-tab="records">紀錄</button>
-  <button data-tab="scan">掃描</button>
-  <button data-tab="manual">手動</button>
-  <button data-tab="stats">統計</button>
-  <button data-tab="settings">設定</button>
+  <button data-tab="home" aria-current="true"><b>🏠</b>首頁</button>
+  <button data-tab="records"><b>📋</b>紀錄</button>
+  <button data-tab="scan"><b>📷</b>掃描</button>
+  <button data-tab="manual"><b>✏️</b>手動</button>
+  <button data-tab="stats"><b>📊</b>統計</button>
+  <button data-tab="settings"><b>⚙️</b>設定</button>
 </nav>
 
 <dialog id="dlg">

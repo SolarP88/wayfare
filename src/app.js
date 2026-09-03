@@ -7,7 +7,7 @@
  */
 
 import {
-  defaultSettings, derive, symbolOf, localDay, tripDays, dayOfTrip,
+  defaultSettings, derive, symbolOf, localDay, tripDays, dayOfTrip, isSpending,
   CATEGORIES, PAYMENT_METHODS,
 } from './model.js';
 import { cashBalance, makeCorrection, cashBurn, pendingRefund } from './wallet.js';
@@ -36,6 +36,7 @@ const state = {
   tab: 'home',
   filter: { category: null, payer: null, payment: null, city: null },
   search: '',
+  recMode: 'date',              // 紀錄頁：'date' 按日期 / 'cat' 按類別
   currentPayer: 'p1',
 };
 
@@ -199,6 +200,14 @@ function renderHome() {
   $('today').textContent = homeM(todayTotal(state.records, todayLocal()));
   $('total').textContent = homeM(tripTotal(state.records));
 
+  // 旅程天數磚。行程外（還沒出發／已回國）不硬湊一個 Day N 出來。
+  const dn = dayOfTrip(todayLocal(), s);
+  const td = tripDays(s);
+  $('dayN').textContent = dn ? `Day ${dn}` : '—';
+  $('dayNSub').textContent = !td ? '行程日期還沒設'
+    : dn ? `共 ${td} 天 · 還有 ${td - dn} 天`
+    : '不在行程期間內';
+
   const bp = budgetProgress(state.records, s);
   if (!bp) {
     $('budgetPct').textContent = '未設預算';
@@ -208,48 +217,144 @@ function renderHome() {
     $('budgetPct').textContent = `${(bp.percent * 100).toFixed(0)}%`;
     $('budgetBar').classList.toggle('over', bp.percent > 1);
     $('budgetBar').firstElementChild.style.width = `${Math.min(100, bp.percent * 100)}%`;
-    $('budgetHint').textContent =
-      `${homeM(bp.used)} / ${homeM(bp.budget)}　每日預算 ${homeM(bp.perDay)}`;
+    // 磚寬只有半個螢幕，長句會擠掉。完整的 used/budget 在統計頁還看得到。
+    $('budgetHint').textContent = `還剩 ${homeM(bp.budget - bp.used)}`;
   }
 
   const pre = preTripTotal(state.records);
-  $('preTrip').textContent = pre ? `行前已付 ${homeM(pre)}（機票／住宿等，不計入每日曲線）` : '';
+  $('preTrip').textContent = pre ? `另有行前 ${homeM(pre)}` : '';
 
   const today = onTripSpending(state.records)
     .filter((r) => localDay(r.date) === todayLocal())
     .sort((a, b) => String(b.date).localeCompare(String(a.date)));
   $('todayCount').textContent = `${today.length} 筆`;
+  const todaySum = today.reduce((acc, r) => acc + (r.amount || 0), 0);
+  $('todaySub').textContent = today.length ? `${local(todaySum)} · ${today.length} 筆` : '';
   fillList($('todayList'), today, '今天還沒有紀錄');
 }
 
 // ---------------------------------------------------------------------------
 // 紀錄
 // ---------------------------------------------------------------------------
-function fillList(ul, rows, emptyText) {
-  ul.textContent = '';
-  if (!rows.length) { ul.append(el('li', { className: 'sub', textContent: emptyText })); return; }
-  for (const r of rows) {
-    const left = el('div', {}, [
-      el('div', { innerHTML: `<strong>${escape(r.storeName || r.storeNameLocal || '(未命名)')}</strong>` }),
-      el('div', { className: 'sub', textContent:
-        [String(r.date || '').slice(0, 16).replace('T', ' '), r.category, r.paymentMethod, r.city]
-          .filter(Boolean).join('　') }),
-    ]);
-    const right = el('div', { style: 'text-align:right' }, [
-      el('div', { className: 'num', textContent: r.isTopUp ? `${local(r.amount)}（儲值）` : local(r.amount) }),
-      el('div', { className: 'sub num', textContent: r.amountHome == null ? '—' : `≈ ${homeM(r.amountHome)}` }),
-    ]);
-    const li = el('li', { className: 'item' }, [
-      el('div', { style: 'display:flex;gap:10px;align-items:center;min-width:0' },
-        (r.needsReview && !r.reviewed) ? [el('span', { className: 'dot' }), left] : [left]),
-      right,
-    ]);
-    li.onclick = () => openRecord(r);
-    ul.append(li);
-  }
+/**
+ * 一筆紀錄的那一行。左圓是類別圖示，中間店名＋標籤，右邊原幣大字／本位幣小字。
+ * `showDate` 給不分組的地方用（今日花費已經在同一天，不用再印日期）。
+ */
+function recRow(r, showDate = false) {
+  const [icon, cls] = catMeta(r.category);
+  const meta = el('div', { className: 'meta' }, [
+    el('span', { className: 'tag', textContent: r.isTopUp ? '儲值' : (r.category || '其他') }),
+  ]);
+  const dim = [
+    showDate ? String(r.date || '').slice(5, 16).replace('T', ' ') : String(r.date || '').slice(11, 16),
+    r.paymentMethod,
+    r.storeName && r.city ? r.city : null,
+  ].filter(Boolean).join(' · ');
+  if (dim) meta.append(el('span', { className: 'dim', textContent: dim }));
+
+  const title = el('div', { className: 't' });
+  if (r.needsReview && !r.reviewed) title.append(el('span', { className: 'dot', style: 'margin-right:7px' }));
+  title.append(document.createTextNode(r.storeName || r.storeNameLocal || '(未命名)'));
+
+  const row = el('div', { className: `rec ${cls}` }, [
+    el('span', { className: 'av', textContent: icon }),
+    el('div', { className: 'mid2' }, [title, meta]),
+    el('div', { className: 'amt' }, [
+      el('div', { className: 'a num', textContent: r.isTopUp ? `${local(r.amount)}` : local(r.amount) }),
+      el('div', { className: 'b num', textContent:
+        r.isTopUp ? '不計花費' : (r.amountHome == null ? '—' : homeM(r.amountHome)) }),
+    ]),
+  ]);
+  row.onclick = () => openRecord(r);
+  return row;
 }
 
+function fillList(ul, rows, emptyText, showDate = false) {
+  ul.textContent = '';
+  if (!rows.length) { ul.append(el('li', { className: 'sub', style: 'padding:12px 0', textContent: emptyText })); return; }
+  for (const r of rows) ul.append(el('li', { style: 'list-style:none' }, [recRow(r, showDate)]));
+}
+
+/**
+ * 分類 → 左圓的圖示與色票 class。
+ * 參考截圖左圓是付款人頭像，**我們刻意放類別**（2026-09-03 決定不做頭像）：
+ * 付款人在詳情與統計裡看得到，類別才是列表上一眼要分辨的東西。
+ * 色票定義在 index.html 的 .c-food / .c-tran …，跟主色分開，換主色不影響辨識。
+ */
+const CAT_META = {
+  餐飲: ['🍜', 'c-food'], 交通: ['🚇', 'c-tran'], 購物: ['🛍️', 'c-shop'],
+  門票: ['🎫', 'c-tick'], 住宿: ['🏨', 'c-stay'], 藥品: ['💊', 'c-med'],
+  其他: ['📦', 'c-etc'],
+};
+const catMeta = (c) => CAT_META[c] || CAT_META['其他'];
+
 const escape = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/**
+ * 把紀錄切成一組一組。日期組印「日期 · Day N」與當組小計；類別組印類別與小計。
+ * 小計只算現場花費（排除儲值與行前），跟首頁的累計用同一條規則，不然兩邊對不起來。
+ */
+function renderGroups(rows) {
+  const box = $('recGroups');
+  box.textContent = '';
+  if (!rows.length) {
+    box.append(el('div', { className: 'card', style: 'padding:16px' },
+      [el('div', { className: 'sub', textContent: '還沒有紀錄' })]));
+    return;
+  }
+
+  const byDate = state.recMode !== 'cat';
+  const groups = new Map();
+  for (const r of rows) {
+    // 行前在兩種模式都自成一組。混進類別組的話，那組的小計（只算現場）
+    // 就不等於組內幾列的和——拿一個數字排序、印另一個數字，看的人一定困惑。
+    const k = r.isPreTrip ? '__pre'
+      : byDate ? (localDay(r.date) || '未知日期')
+      : (r.isTopUp ? '__topup' : (r.category || '其他'));
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  }
+
+  // 每組印什麼數字，就用那個數字排序。
+  const shown = (k) => groups.get(k).reduce(
+    (a, r) => a + ((k === '__pre' || isSpending(r)) ? (r.amountHome ?? 0) : 0), 0);
+  const keys = [...groups.keys()];
+  if (byDate) {
+    keys.sort((a, b) => (a === '__pre' ? 1 : b === '__pre' ? -1 : b.localeCompare(a)));
+  } else {
+    keys.sort((a, b) => (a === '__pre' ? 1 : b === '__pre' ? -1
+      : a === '__topup' ? 1 : b === '__topup' ? -1 : shown(b) - shown(a)));
+  }
+
+  for (const k of keys) {
+    const list = groups.get(k);
+
+    let label, right;
+    if (k === '__pre') {
+      label = '行前已付';
+      right = homeM(shown(k));
+    } else if (k === '__topup') {
+      // 儲值組印 S$0.00 會讓人以為壞了。印原幣總額，並講清楚它為什麼不算花費。
+      label = '儲值';
+      right = `${local(list.reduce((a, r) => a + (r.amount || 0), 0))}　不計花費`;
+    } else if (!byDate) {
+      label = k;
+      right = homeM(shown(k));
+    } else {
+      const d = dayOfTrip(k, state.settings);
+      label = k.slice(5).replace('-', '/') + (d ? `　Day ${d}` : '');
+      right = homeM(shown(k));
+    }
+
+    box.append(el('div', { className: 'dayhd' }, [
+      el('span', { className: 'd', textContent: label }),
+      el('span', { className: 's num', textContent: right }),
+    ]));
+    const ul = el('ul', { className: 'list' });
+    fillList(ul, list, '', !byDate);
+    box.append(el('div', { className: 'card', style: 'padding:4px 15px' }, [ul]));
+  }
+}
 
 function renderRecords() {
   const chips = $('filters');
@@ -275,7 +380,15 @@ function renderRecords() {
     .sort((a, b) => String(b.date).localeCompare(String(a.date)));
 
   $('recCount').textContent = `全部紀錄（${rows.length}）`;
-  fillList($('recList'), rows, '還沒有紀錄');
+  $('recTotal').textContent = homeM(
+    rows.filter((r) => isSpending(r) && !r.isPreTrip).reduce((a, r) => a + (r.amountHome ?? 0), 0));
+
+  // 分段切換。狀態放 state.recMode，切換不重讀資料庫。
+  for (const b of $('recMode').querySelectorAll('button')) {
+    b.setAttribute('aria-pressed', String(state.recMode === b.dataset.mode));
+    b.onclick = () => { state.recMode = b.dataset.mode; renderRecords(); };
+  }
+  renderGroups(rows);
 
   $('btnTrash').onclick = async () => {
     const rows2 = await db.recentlyDeleted();
@@ -594,13 +707,64 @@ function bars(rows, fmt = homeM) {
   return box;
 }
 
+/** 分類色票，跟 index.html 的 .c-* 同一組值。甜甜圈要真的顏色不能吃 CSS 變數。 */
+const CAT_COLOR = {
+  餐飲: '#C97F5E', 交通: '#6F93B5', 購物: '#B98098', 門票: '#9887BC',
+  住宿: '#6FA394', 藥品: '#C08181', 其他: '#8C95A3',
+};
+const PAY_COLOR = ['#6F93B5', '#5B8464', '#C97F5E', '#B98098', '#9887BC', '#8C95A3'];
+
+/**
+ * 甜甜圈。純 SVG，不載任何函式庫（§4：離線也要能看）。
+ * 顏色給不到就退回一組固定序列，不會變成看不見的黑圈。
+ */
+function donut(rows, colorOf) {
+  if (!rows.length) return el('div', { className: 'sub', textContent: '還沒有資料' });
+  const total = rows.reduce((a, r) => a + Math.abs(r.value), 0);
+  if (!total) return el('div', { className: 'sub', textContent: '還沒有資料' });
+
+  const R = 46, C = 2 * Math.PI * R;
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('width', '104'); svg.setAttribute('height', '104');
+  svg.setAttribute('viewBox', '0 0 118 118');
+  const ring = (stroke, dash, offset) => {
+    const c = document.createElementNS(ns, 'circle');
+    c.setAttribute('cx', '59'); c.setAttribute('cy', '59'); c.setAttribute('r', String(R));
+    c.setAttribute('fill', 'none'); c.setAttribute('stroke', stroke); c.setAttribute('stroke-width', '15');
+    if (dash) { c.setAttribute('stroke-dasharray', dash); c.setAttribute('stroke-dashoffset', String(offset)); }
+    c.setAttribute('transform', 'rotate(-90 59 59)');
+    return c;
+  };
+  svg.append(ring('var(--sunk)'));
+
+  const legend = el('div', { className: 'lg' });
+  let off = 0;
+  rows.forEach((r, i) => {
+    const pct = Math.abs(r.value) / total;
+    const len = C * pct;
+    const color = colorOf(r.key, i);
+    // 段與段之間留 2.5 的縫，才看得出是幾段；最後一段不留，免得繞回起點缺一角
+    const gap = rows.length > 1 ? 2.5 : 0;
+    svg.append(ring(color, `${Math.max(0, len - gap)} ${C - len + gap}`, -off));
+    off += len;
+    legend.append(el('div', { className: 'lgr' }, [
+      el('i', { className: 'k', style: `background:${color}` }),
+      el('span', { className: 'n', textContent: r.key || '未分類' }),
+      el('span', { className: 'p num', textContent: `${(pct * 100).toFixed(1)}%` }),
+      el('span', { className: 'v num', textContent: homeM(r.value) }),
+    ]));
+  });
+  return el('div', { className: 'donut' }, [svg, legend]);
+}
+
 function renderStats() {
   const R = state.records;
   const daily = dailySeries(R, state.settings)
     .map((d) => ({ key: `Day ${d.day ?? '-'}　${String(d.date).slice(5)}`, value: d.value }));
   $('chartDaily').replaceChildren(bars(daily));
-  $('chartCat').replaceChildren(bars(byCategory(R)));
-  $('chartPay').replaceChildren(bars(byPayment(R)));
+  $('chartCat').replaceChildren(donut(byCategory(R), (k) => CAT_COLOR[k] || CAT_COLOR['其他']));
+  $('chartPay').replaceChildren(donut(byPayment(R), (k, i) => PAY_COLOR[i % PAY_COLOR.length]));
   $('chartCity').replaceChildren(bars(byCity(R)));
 
   const names = new Map((state.settings.payers || []).map((p) => [p.id, p.name || p.id]));
@@ -608,18 +772,28 @@ function renderStats() {
 
   $('refundTotal').textContent = local(pendingRefund(R));
 
+  // 排行。topSpends 只回摘要，類別／支付方式回原始紀錄撈（不改 stats.js 的介面）
+  const byId = new Map(R.map((r) => [r.id, r]));
   const top = topSpends(R);
-  const t = el('table');
-  t.append(el('tr', {}, [el('th', { textContent: '店名' }), el('th', { className: 'n', textContent: '金額' })]));
-  for (const s of top) {
-    t.append(el('tr', {}, [
-      el('td', {}, [el('div', { textContent: s.storeName || '(未命名)' }),
-                    el('div', { className: 'sub', textContent: String(s.date).slice(0, 10) })]),
-      el('td', { className: 'n' }, [el('div', { textContent: local(s.amount) }),
-                                    el('div', { className: 'sub', textContent: homeM(s.amountHome) })]),
+  const box = el('div');
+  top.forEach((t, i) => {
+    const full = byId.get(t.id) || {};
+    const [icon, cls] = catMeta(full.category);
+    box.append(el('div', { className: `rank ${cls}` }, [
+      el('span', { className: 'rk', textContent: String(i + 1) }),
+      el('span', { className: 'av', style: 'width:32px;height:32px;font-size:14px', textContent: icon }),
+      el('div', { className: 'mid2' }, [
+        el('div', { className: 't', textContent: t.storeName || '(未命名)' }),
+        el('div', { className: 'dim', textContent:
+          [full.category, full.paymentMethod, String(t.date).slice(5, 10)].filter(Boolean).join(' · ') }),
+      ]),
+      el('div', { className: 'amt' }, [
+        el('div', { className: 'a num', textContent: local(t.amount) }),
+        el('div', { className: 'b num', textContent: homeM(t.amountHome) }),
+      ]),
     ]));
-  }
-  $('topList').replaceChildren(top.length ? t : el('div', { className: 'sub', textContent: '還沒有資料' }));
+  });
+  $('topList').replaceChildren(top.length ? box : el('div', { className: 'sub', textContent: '還沒有資料' }));
 }
 
 // ---------------------------------------------------------------------------
