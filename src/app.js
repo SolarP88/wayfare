@@ -288,6 +288,14 @@ const CAT_META = {
 };
 const catMeta = (c) => CAT_META[c] || CAT_META['其他'];
 
+/**
+ * 付款人下拉的選項。`p1` / `p2` 是**內部代號，不給人看**——
+ * 存進紀錄的 payer 一定是 id，但選單上要印她在設定頁填的名字。
+ * 回 [value, label] 兩欄；下面兩個 select 產生器都吃得到這個形狀。
+ */
+const payerOptions = () =>
+  (state.settings.payers || []).filter((p) => p.name).map((p) => [p.id, p.name]);
+
 const escape = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 /**
@@ -425,7 +433,10 @@ function openRecord(r) {
     let input;
     if (opts) {
       input = el('select');
-      for (const o of opts) input.append(el('option', { value: o, textContent: o, selected: r[key] === o }));
+      for (const o of opts) {
+        const [val, text] = Array.isArray(o) ? o : [o, o];
+        input.append(el('option', { value: val, textContent: text, selected: r[key] === val }));
+      }
     } else {
       input = el('input', { type, value: r[key] ?? '' });
       if (type === 'number') input.inputMode = 'numeric';
@@ -440,7 +451,7 @@ function openRecord(r) {
   f('金額（當地）', 'amount', 'number');
   f('類別', 'category', 'text', CATEGORIES);
   f('支付方式', 'paymentMethod', 'text', PAYMENT_METHODS);
-  f('付款人', 'payer', 'text', (state.settings.payers || []).filter((p) => p.name).map((p) => p.id));
+  f('付款人', 'payer', 'text', payerOptions());
   f('城市', 'city');
   f('備註', 'note');
 
@@ -651,7 +662,7 @@ function renderManual() {
     ['currency', '幣別', 'select', [state.settings.localCurrency, state.settings.homeCurrency]],
     ['category', '類別', 'select', CATEGORIES],
     ['paymentMethod', '支付方式', 'select', PAYMENT_METHODS],
-    ['payer', '付款人', 'select', (state.settings.payers || []).filter((p) => p.name).map((p) => p.id)],
+    ['payer', '付款人', 'select', payerOptions()],
     ['city', '城市', 'text'],
     ['note', '備註', 'text'],
   ];
@@ -660,7 +671,10 @@ function renderManual() {
     let input;
     if (type === 'select') {
       input = el('select');
-      for (const o of opts) input.append(el('option', { value: o, textContent: o }));
+      for (const o of opts) {
+        const [val, text] = Array.isArray(o) ? o : [o, o];
+        input.append(el('option', { value: val, textContent: text }));
+      }
     } else {
       input = el('input', { type });
       if (type === 'number') input.inputMode = 'numeric';
@@ -885,7 +899,11 @@ function renderSettings() {
     const name = el('input', { value: p.name || '', placeholder: i ? '（沒有第二人就留白）' : '' });
     name.onchange = async () => {
       state.settings.payers[i].name = name.value;
-      await db.saveSettings(state.settings); render();
+      await db.saveSettings(state.settings);
+      // 手動輸入那張表只建一次（dataset.built），不清掉的話改完名字還印舊的
+      delete $('manualForm').dataset.built;
+      $('manualForm').textContent = '';
+      render();
     };
     nameW.append(name);
 
