@@ -158,11 +158,33 @@ function renderHeader() {
     : '還沒設定行程 —— 去設定頁填行程起訖日';
 }
 
+/**
+ * 這趟用得到哪些匯率 → [[名稱, 有沒有填好], ...]
+ *
+ * 「用得到」的定義是**已經有那種付款方式的紀錄**，不是「理論上可能會用」。
+ * 現金匯率永遠算用得到——現鈔一定會花到，而且 Suica／PayPay 儲值也是走它。
+ */
+function ratesNeeded() {
+  const s = state.settings;
+  const usedMethod = (m) => state.records.some((r) => r.paymentMethod === m);
+  const out = [['現金匯率', s.cashRate > 0]];
+  if (usedMethod('信用卡')) out.push(['刷卡匯率', s.cardRate > 0]);
+  if (usedMethod('Wise') || state.wallet.some((w) => w.pot === 'wise' && (w.amount || 0) > 0)) {
+    // Wise 匯率沒填會退回現金匯率，所以只有「現金匯率也沒填」才算真的缺
+    out.push(['Wise 匯率', (s.wiseRate > 0) || (s.cashRate > 0)]);
+  }
+  return out;
+}
+
 /** 首頁紅字提醒（§17.4）。只講**現在就該處理**的，不要變成雜訊。 */
 function renderWarnings() {
   const s = state.settings;
   if (!s.apiKey) banner('bad', '還沒填 API key，拍照無法辨識。去設定頁貼上。');
-  if (!s.cashRate || !s.cardRate) banner('warn', '匯率還沒設，本位幣金額會顯示「—」。');
+  // 只唸**用得到**的匯率。這趟不刷信用卡的人，不該被一條永遠消不掉的黃字追著跑。
+  const missingRates = ratesNeeded().filter(([, ok]) => !ok).map(([label]) => label);
+  if (missingRates.length) {
+    banner('warn', `${missingRates.join('、')}還沒設，這幾種付款方式的本位幣金額會顯示「—」。`);
+  }
   if (!s.tripStart || !s.tripEnd) banner('warn', '還沒設行程起訖日，Day N、每日曲線、行前判斷都不會動。');
   // 沒確認的收據**不算進任何數字**，所以這條要顯眼——忘了確認，首頁會少一截。
   if (state.drafts.length) {
@@ -1198,25 +1220,47 @@ function renderSettings() {
   renderPreflight();
 }
 
-/** 出發前檢查清單（§17）。抽成獨立一支，設定改完可以單獨重畫。 */
+/**
+ * 出發前檢查清單（§17）。抽成獨立一支，設定改完可以單獨重畫。
+ *
+ * ⚠️ 2026-09-08：改成**只檢查這趟用得到的**。她這趟只用現鈔 / Wise / Suica，
+ * 原本那條「刷卡匯率 未完成」會永遠綠不了，逼人去填一個不會用到的數字——
+ * 一張永遠不會全綠的清單，看久了就整張都不看了。
+ */
 function renderPreflight() {
   const pf = $('preflight'); pf.textContent = '';
   const s = state.settings;
+  const usedMethod = (m) => state.records.some((r) => r.paymentMethod === m);
+  const wiseUsed = usedMethod('Wise')
+    || state.wallet.some((w) => w.pot === 'wise' && (w.amount || 0) > 0);
+
+  // [標籤, 好了沒, 這趟用不用得到]
   const checks = [
-    ['行程起訖日', !!(s.tripStart && s.tripEnd)],
-    ['總預算', s.totalBudget > 0],
-    ['現金匯率', s.cashRate > 0],
-    ['刷卡匯率', s.cardRate > 0],
-    ['初始現金', (s.payers || []).some((p) => p.initialCash > 0)],
-    ['行程表（GPS 備援）', (s.schedule || []).length > 0],
-    ['API key', !!s.apiKey],
-    ['備份試過一次', !!s.lastBackupAt],
-    ['拿真收據試拍過', state.records.some((r) => r.entryMode === 'scan')],
+    ['行程起訖日', !!(s.tripStart && s.tripEnd), true],
+    ['總預算', s.totalBudget > 0, true],
+    ['現金匯率', s.cashRate > 0, true],
+    ['刷卡匯率', s.cardRate > 0, usedMethod('信用卡')],
+    ['Wise 匯率', s.wiseRate > 0, wiseUsed],
+    ['初始現金', (s.payers || []).some((p) => p.initialCash > 0), true],
+    ['行程表（GPS 備援）', (s.schedule || []).length > 0, true],
+    ['API key', !!s.apiKey, true],
+    ['備份試過一次', !!s.lastBackupAt, true],
+    ['拿真收據試拍過', state.records.some((r) => r.entryMode === 'scan'), true],
   ];
-  for (const [label, done] of checks) {
+
+  // 註：Wise 匯率沒填時金額仍算得出來（退回現金匯率），所以**首頁不會跳黃字**；
+  //     但那是估的，出發前該把真的數字填進去 —— 清單這裡照樣要求。
+  for (const [label, done, needed] of checks) {
+    // 用不到又沒填 → 「用不到」（灰的，不算未完成）。填了就照樣打勾，不要把她填的東西講成廢的。
+    const state3 = done ? 'done' : (needed ? 'todo' : 'skip');
+    const look = {
+      done: ['good', '✓'],
+      todo: ['warn', '未完成'],
+      skip: ['muted', '用不到'],
+    }[state3];
     pf.append(el('li', { className: 'item' }, [
       el('span', { textContent: label }),
-      el('strong', { className: done ? 'good' : 'warn', textContent: done ? '✓' : '未完成' }),
+      el('strong', { className: look[0], textContent: look[1] }),
     ]));
   }
 }
