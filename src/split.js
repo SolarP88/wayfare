@@ -243,6 +243,10 @@ export function toRecords(receipt, lines) {
     taxType: receipt.taxType,
     entryMode: receipt.entryMode,
     needsReview: !!receipt.needsReview,
+    // ⚠️ `reviewed` 一定要跟著下來。首頁那條「有 N 筆待確認」數的是**品項**
+    //    （needsReview && !reviewed），只在收據上蓋 reviewed 的話，
+    //    她確認幾次橫幅都不會消失（2026-09-08 她回報「一直顯示待確認」）。
+    reviewed: !!receipt.reviewed,
     reviewReason: receipt.reviewReason || null,
 
     taxRefundPending: i === 0 ? (receipt.taxRefundPending ?? null) : null,

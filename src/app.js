@@ -714,6 +714,11 @@ async function onRecognized(item) {
   const city = d.city
     || (item.coords ? null : cityFromSchedule(date, state.settings.schedule));
 
+  // 收據上沒印日期時，用拍照時間頂上——但要**講出來頂了什麼**，
+  // 只說「收據上未顯示日期」的話，她不知道現在填的是什麼、要不要動它。
+  const dateNote = d.date ? null
+    : `收據上沒有日期，已用拍照時間 ${String(date).slice(5, 16).replace('T', ' ')} 代替（不對就改上面的日期欄位）`;
+
   const receipt = {
     id: item.id,
     date,
@@ -738,8 +743,8 @@ async function onRecognized(item) {
     items: d.items,
     entryMode: 'scan',
     // 程式端驗算優先於 AI 自評（§7.5：不看 AI 的 checks，自己重算）
-    needsReview: (item.issues?.length || 0) > 0 || d.needsReview === true,
-    reviewReason: item.issues?.join('；') || d.reviewReason || null,
+    needsReview: (item.issues?.length || 0) > 0 || d.needsReview === true || !!dateNote,
+    reviewReason: [dateNote, item.issues?.join('；') || d.reviewReason].filter(Boolean).join('；') || null,
     issues: item.issues,
     model: item.model, escalated: item.escalated,
     status: db.RECEIPT_STATUS.draft,
