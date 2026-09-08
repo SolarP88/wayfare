@@ -75,18 +75,50 @@ export function cityFromSchedule(dateISO, schedule) {
 }
 
 /** 解析設定頁那個純文字行程框。格式壞掉的行**跳過並回報**，不要靜靜吞掉。 */
-export function parseSchedule(text) {
+export function parseSchedule(text, opts = {}) {
   const rows = [];
   const bad = [];
-  for (const raw of String(text || '').split(/\r?\n/)) {
+
+  // 短日期要有年份才補得完整。以行程首日的年份為準；沒設就用今年。
+  const baseYear = Number(String(opts.tripStart || '').slice(0, 4))
+    || new Date().getFullYear();
+  const baseMonth = Number(String(opts.tripStart || '').slice(5, 7)) || 1;
+
+  /** 11/29 → 2026-11-29。跨年（行程 12/28–01/03 那種）自動 +1 年。 */
+  const expand = (md) => {
+    const m = md.match(/^(\d{1,2})\/(\d{1,2})$/);
+    if (!m) return null;
+    const mon = Number(m[1]), day = Number(m[2]);
+    if (mon < 1 || mon > 12 || day < 1 || day > 31) return null;
+    const year = mon < baseMonth ? baseYear + 1 : baseYear;
+    return `${year}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  };
+
+  const norm = (token) => (/^\d{4}-\d{2}-\d{2}$/.test(token) ? token : expand(token));
+
+  for (const [i, raw] of String(text || '').split(/\r?\n/).entries()) {
     const line = raw.trim();
     if (!line) continue;
-    // 「旭川 2026-11-29 2026-11-30」或「旭川 11/29-11/30」
-    const iso = line.match(/^(\S+)\s+(\d{4}-\d{2}-\d{2})(?:\s*[~\-—]\s*|\s+)(\d{4}-\d{2}-\d{2})$/);
-    if (iso) { rows.push({ city: iso[1], from: iso[2], to: iso[3] }); continue; }
-    const one = line.match(/^(\S+)\s+(\d{4}-\d{2}-\d{2})$/);
-    if (one) { rows.push({ city: one[1], from: one[2], to: one[2] }); continue; }
-    bad.push(line);
+
+    // 城市 + 一到兩個日期。日期兩種寫法都收：2026-11-29 或 11/29
+    const m = line.match(/^(\S+)\s+(\S+?)(?:\s*[~\-—到]\s*|\s+)(\S+)$/)
+      || line.match(/^(\S+)\s+(\S+)$/);
+    if (!m) { bad.push({ line, no: i + 1, why: '格式是「城市 起日 迄日」，例如：札幌 11/29 12/01' }); continue; }
+
+    const city = m[1];
+    const aRaw = m[2];
+    const bRaw = m[3];
+    const from = norm(aRaw);
+    const to = bRaw == null ? from : norm(bRaw);
+
+    // ⚠️ 一定要講清楚錯在哪一個日期。只說「看不懂」的話，
+    //    她得自己盯著 2026-0911 跟 2026-09-11 找那個橫線（2026-09-08 真的發生過）。
+    if (!from) { bad.push({ line, no: i + 1, why: `起日「${aRaw}」格式不對，要寫 2026-11-29 或 11/29` }); continue; }
+    if (!to) { bad.push({ line, no: i + 1, why: `迄日「${bRaw}」格式不對，要寫 2026-11-29 或 11/29` }); continue; }
+    if (to < from) { bad.push({ line, no: i + 1, why: `迄日 ${to} 比起日 ${from} 還早` }); continue; }
+
+    rows.push({ city, from, to });
   }
   return { rows, bad };
 }
+

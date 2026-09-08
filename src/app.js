@@ -1197,19 +1197,48 @@ function renderSettings() {
 
   const sch = $('settingsSchedule'); sch.textContent = '';
   sch.append(el('div', { className: 'sub', style: 'margin-bottom:8px', textContent:
-    'GPS 失效時的備援。一行一個：城市 起日 迄日（例：旭川 2026-11-29 2026-11-30）' }));
+    'GPS 失效時的備援。一行一個：城市 起日 迄日。日期可以寫 2026-11-29 或 11/29。' }));
+
   const ta = el('textarea', { value: (state.settings.schedule || [])
-    .map((r) => `${r.city} ${r.from} ${r.to}`).join('\n') });
-  ta.onchange = async () => {
-    const { rows, bad } = parseSchedule(ta.value);
+    .map((r) => (r.from === r.to ? `${r.city} ${r.from}` : `${r.city} ${r.from} ${r.to}`)).join('\n') });
+  const schOut = el('div', { style: 'margin-top:8px' });
+
+  /**
+   * 邊打邊存邊驗。
+   *
+   * ⚠️ 2026-09-08 修：原本只在離開輸入框時存，錯誤訊息也只說「這幾行看不懂」。
+   * 她把 2026-09-11 打成 2026-0911，整行被丟掉、清單那格一直沒打勾，
+   * 而她根本沒看到那句黃字。現在：即時驗、講清楚第幾行錯在哪、成功也說一聲。
+   */
+  const applySchedule = async () => {
+    const { rows, bad } = parseSchedule(ta.value, { tripStart: state.settings.tripStart });
     state.settings.schedule = rows;
     await db.saveSettings(state.settings);
-    // 格式壞掉的行要講出來，不要靜靜吞掉
-    sch.querySelector('.banner')?.remove();
-    if (bad.length) sch.append(el('div', { className: 'banner warn',
-      textContent: `這幾行看不懂，沒有存進去：${bad.join(' / ')}` }));
+    renderPreflight();
+
+    schOut.textContent = '';
+    if (bad.length) {
+      schOut.append(el('div', { className: 'banner warn' }, [
+        el('div', { textContent: `這 ${bad.length} 行沒有存進去：` }),
+        ...bad.map((b) => el('div', { style: 'margin-top:4px',
+          textContent: `第 ${b.no} 行「${b.line}」—— ${b.why}` })),
+      ]));
+    }
+    if (rows.length) {
+      schOut.append(el('div', { className: 'sub', textContent:
+        `已存 ${rows.length} 段：` + rows.map((r) =>
+          `${r.city} ${r.from.slice(5)}${r.from === r.to ? '' : `–${r.to.slice(5)}`}`).join('、') }));
+    } else if (!bad.length) {
+      schOut.append(el('div', { className: 'sub', textContent: '還沒填。GPS 抓得到城市時不填也能用。' }));
+    }
   };
-  sch.append(el('div', { className: 'field' }, [ta]));
+
+  let schTimer = null;
+  ta.oninput = () => { clearTimeout(schTimer); schTimer = setTimeout(applySchedule, 500); };
+  ta.onchange = () => { clearTimeout(schTimer); applySchedule(); };
+
+  sch.append(el('div', { className: 'field' }, [ta]), schOut);
+  applySchedule();
 
   const api = $('settingsApi'); api.textContent = '';
   settingField(api, 'apiKey', 'Gemini API key', 'password');
