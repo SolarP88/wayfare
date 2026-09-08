@@ -1902,6 +1902,10 @@ function renderConfirm() {
   }
   field('日期時間', String(rc.date || '').slice(0, 16), 'datetime-local', (v) => { rc.date = v; });
   field('合計（收據上印的那個數字）', rc.total, 'number', (v) => { rc.total = v; redraw(); });
+  // ⚠️ 幣別一定要能改。拆多筆重做這一頁時漏了這欄，結果她把 Donki 記成 SGD 之後
+  //    只能刪掉重記（2026-09-08 她回報「手動改幣別改不到」）。
+  field('幣別', cur, 'text', (v) => { rc.currency = v; redraw(); },
+    [...new Set([state.settings.localCurrency, state.settings.homeCurrency, cur])]);
   field('類別', rc.category, 'text', (v) => {
     // 整張改類別時，沒有被個別改過的那幾行跟著走（2026-09-08 她的決定）
     const before = rc.category;
