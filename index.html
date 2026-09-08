@@ -7,6 +7,17 @@
 <meta name="theme-color" content="#131519" media="(prefers-color-scheme: dark)">
 <title>旅行記帳</title>
 <link rel="manifest" href="manifest.webmanifest">
+<script>
+  /* 在畫面畫出來之前先把主題套上，不然深色模式的人每次開都會先閃一下白底。
+     這段刻意寫在這裡而不是 app.js —— app.js 是 module，會等 DOM 解析完才跑。 */
+  try {
+    var m = localStorage.getItem('wayfare-theme');
+    if (m === 'light' || m === 'dark') {
+      document.documentElement.setAttribute('data-theme', m);
+      document.documentElement.style.colorScheme = m;
+    }
+  } catch (e) { /* 私密視窗讀不到 localStorage 是正常的，那就跟系統走 */ }
+</script>
 <style>
 /* ---------------------------------------------------------------------------
    §14 視覺規範。三件事是北海道 12 月特有的，不是「好看」的問題：
@@ -28,14 +39,26 @@
   --radius:18px;
   --shadow:0 1px 2px rgba(23,25,30,.04), 0 6px 18px rgba(23,25,30,.06);
 }
+/* 深色有兩個來源，兩份都要寫（2026-09-08 加了設定頁的外觀開關）：
+   · 系統是深色，而且使用者**沒有**指定淺色 → 下面這份
+   · 使用者在設定頁選了深色 → 再下面那份（不管系統是什麼）
+   只寫媒體查詢那份的話，手動選深色不會生效；只寫 [data-theme] 那份的話，
+   沒選過的人永遠是淺色。 */
 @media (prefers-color-scheme: dark){
-  :root{
+  :root:not([data-theme="light"]){
     --bg:#131519; --card:#1C1F25; --sunk:#22262D;
     --ink:#F1F2F5; --ink2:#D3D7DE; --muted:#9DA6B4; --line:#2C313A;
     --accent:#86B2CF; --accent-soft:#1F2A33; --accent-ink:#131519;
     --good:#5FC48D; --warn:#E0A94A; --bad:#F08278;
     --shadow:0 1px 2px rgba(0,0,0,.25), 0 6px 18px rgba(0,0,0,.22);
   }
+}
+:root[data-theme="dark"]{
+    --bg:#131519; --card:#1C1F25; --sunk:#22262D;
+    --ink:#F1F2F5; --ink2:#D3D7DE; --muted:#9DA6B4; --line:#2C313A;
+    --accent:#86B2CF; --accent-soft:#1F2A33; --accent-ink:#131519;
+    --good:#5FC48D; --warn:#E0A94A; --bad:#F08278;
+    --shadow:0 1px 2px rgba(0,0,0,.25), 0 6px 18px rgba(0,0,0,.22);
 }
 /* 分類色票：跟主色分開，換主色不影響辨識 */
 .c-food{--c:#C97F5E}.c-tran{--c:#6F93B5}.c-shop{--c:#B98098}.c-tick{--c:#9887BC}
@@ -370,6 +393,11 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
   <!-- 設定 ------------------------------------------------------------ -->
   <section id="tab-settings" hidden>
     <div class="card"><strong>基本</strong><div id="settingsBasic"></div></div>
+    <div class="card"><strong>外觀</strong>
+      <div class="sub" style="margin:6px 0 12px">雪地反光看不清就切淺色，晚上切深色。只影響這台手機。</div>
+      <div class="chips" id="themeChips"></div>
+    </div>
+
     <div class="card"><strong>匯率</strong><div id="settingsFx"></div>
       <button class="btn wide" id="btnRefRate">更新參考匯率</button>
       <div class="sub" id="refRateOut" style="margin-top:8px">

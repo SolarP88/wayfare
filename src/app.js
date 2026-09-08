@@ -90,6 +90,7 @@ async function boot() {
     save: onRecognized,
   });
 
+  applyTheme(currentTheme());
   wireTabs();
   wireScan();
   wireHome();
@@ -936,6 +937,53 @@ function renderStats() {
 }
 
 // ---------------------------------------------------------------------------
+// 外觀（深淺色）
+//
+// 存在 localStorage **不是** settings —— settings 會進備份檔，
+// 主題是「這台手機這個人」的偏好，不該跟著備份跑到別人的手機上。
+// ---------------------------------------------------------------------------
+const THEME_MODES = [['auto', '跟隨系統'], ['light', '淺色'], ['dark', '深色']];
+const THEME_BAR = { light: '#F6F4F1', dark: '#131519' };   // 狀態列顏色，跟 --bg 一樣
+
+function currentTheme() {
+  try {
+    const m = localStorage.getItem('wayfare-theme');
+    return THEME_MODES.some(([v]) => v === m) ? m : 'auto';
+  } catch { return 'auto'; }
+}
+
+function applyTheme(mode) {
+  const root = document.documentElement;
+  if (mode === 'auto') { root.removeAttribute('data-theme'); root.style.colorScheme = ''; }
+  else { root.setAttribute('data-theme', mode); root.style.colorScheme = mode; }
+
+  // 手機狀態列 / 網址列的底色。不換的話全螢幕模式下會出現一條顏色不對的邊。
+  for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.remove();
+  if (mode === 'auto') {
+    document.head.append(el('meta', { name: 'theme-color', content: THEME_BAR.light, media: '(prefers-color-scheme: light)' }));
+    document.head.append(el('meta', { name: 'theme-color', content: THEME_BAR.dark, media: '(prefers-color-scheme: dark)' }));
+  } else {
+    document.head.append(el('meta', { name: 'theme-color', content: THEME_BAR[mode] }));
+  }
+}
+
+function renderThemeChips() {
+  const box = $('themeChips');
+  box.textContent = '';
+  const now = currentTheme();
+  for (const [value, label] of THEME_MODES) {
+    const b = el('button', { className: 'chip', textContent: label });
+    b.setAttribute('aria-pressed', String(value === now));
+    b.onclick = () => {
+      try { localStorage.setItem('wayfare-theme', value); } catch { /* 存不到就這次有效 */ }
+      applyTheme(value);
+      renderThemeChips();
+    };
+    box.append(b);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 設定
 // ---------------------------------------------------------------------------
 function settingField(parent, key, label, type = 'text', opts) {
@@ -1003,6 +1051,7 @@ function wireSettings() {
 }
 
 function renderSettings() {
+  renderThemeChips();
   const basic = $('settingsBasic'); basic.textContent = '';
   settingField(basic, 'homeCurrency', '本位幣', 'text', ['SGD', 'MYR', 'TWD', 'USD', 'EUR']);
   settingField(basic, 'localCurrency', '當地幣別', 'text', ['JPY', 'KRW', 'TWD', 'THB']);
