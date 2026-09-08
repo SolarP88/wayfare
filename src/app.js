@@ -986,6 +986,16 @@ function renderThemeChips() {
 // ---------------------------------------------------------------------------
 // 設定
 // ---------------------------------------------------------------------------
+/**
+ * 設定頁的一個欄位。
+ *
+ * ⚠️ 2026-09-08 修：原本只在 `change`（離開欄位）時存，而且存完**只重畫標題列**。
+ * 結果是貼上 API key 之後，紅字「還沒填 API key」跟出發前檢查清單都沒動——
+ * 東西明明存進去了，畫面卻說沒有。她第一次真機實測就卡在這裡。
+ *
+ * 現在：邊打邊存（防抖），存完把**紅字橫條與檢查清單一起重畫**，並顯示「已儲存」。
+ * 重畫刻意不用 render()——那會把整張設定表重建，游標會被踢出正在打字的欄位。
+ */
 function settingField(parent, key, label, type = 'text', opts) {
   const wrap = el('div', { className: 'field' }, [el('label', { textContent: label })]);
   let input;
@@ -996,12 +1006,25 @@ function settingField(parent, key, label, type = 'text', opts) {
     input = el('input', { type, value: state.settings[key] ?? '' });
     if (type === 'number') input.inputMode = 'decimal';
   }
-  input.onchange = async () => {
+
+  const hint = el('div', { className: 'sub', style: 'min-height:18px' });
+  let timer = null;
+
+  const save = async () => {
     state.settings[key] = type === 'number' ? Number(input.value) : input.value;
     await db.saveSettings(state.settings);
+    hint.textContent = '已儲存';
+    setTimeout(() => { hint.textContent = ''; }, 2000);
     renderHeader();
+    clearBanners();
+    renderWarnings();
+    renderPreflight();
   };
-  wrap.append(input);
+
+  input.oninput = () => { clearTimeout(timer); timer = setTimeout(save, 600); };
+  input.onchange = () => { clearTimeout(timer); save(); };     // 收鍵盤 / 選單改完立刻存
+
+  wrap.append(input, hint);
   parent.append(wrap);
 }
 
@@ -1120,6 +1143,11 @@ function renderSettings() {
   api.append(el('div', { className: 'sub', textContent:
     '⚠️ 每個人要用自己的 key。共用一把會互相吃掉額度，用量也會混在一起。' }));
 
+  renderPreflight();
+}
+
+/** 出發前檢查清單（§17）。抽成獨立一支，設定改完可以單獨重畫。 */
+function renderPreflight() {
   const pf = $('preflight'); pf.textContent = '';
   const s = state.settings;
   const checks = [
