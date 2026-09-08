@@ -23,7 +23,9 @@ export function preTripTotal(records) {
 function sumBy(records, keyFn, valueFn) {
   const out = new Map();
   for (const r of records) {
-    const k = keyFn(r) ?? '未分類';
+    // ⚠️ 用 || 不是 ??：城市有可能是**空字串**（手動輸入沒填），
+    //    用 ?? 的話 '' 跟 null 會變成兩個不同的組，畫面上出現兩行「未分類」。
+    const k = keyFn(r) || '未分類';
     out.set(k, (out.get(k) || 0) + (valueFn(r) || 0));
   }
   return [...out.entries()]
@@ -34,6 +36,21 @@ function sumBy(records, keyFn, valueFn) {
 const home = (r) => r.amountHome ?? 0;
 const local = (r) => r.amount ?? 0;
 
+/**
+ * 只留當地幣的現場花費。
+ *
+ * 統計頁的金額改成日圓之後（§9 原幣大字），**不可以把 S$30 加進 ¥ 的總和**。
+ * 非當地幣的部分用 otherCurrencyTotal() 另外講一句，不要混進圖表。
+ */
+function localOnly(records, localCurrency) {
+  return onTripSpending(records).filter((r) => (r.currency || localCurrency) === localCurrency);
+}
+
+export function byCategoryLocal(records, cur) { return sumBy(localOnly(records, cur), (r) => r.category, local); }
+export function byPaymentLocal(records, cur) { return sumBy(localOnly(records, cur), (r) => r.paymentMethod, local); }
+export function byPayerLocal(records, cur) { return sumBy(localOnly(records, cur), (r) => r.payer, local); }
+export function byCityLocal(records, cur) { return sumBy(localOnly(records, cur), (r) => r.city, local); }
+
 export function byCategory(records) { return sumBy(onTripSpending(records), (r) => r.category, home); }
 export function byPayment(records) { return sumBy(onTripSpending(records), (r) => r.paymentMethod, home); }
 export function byPayer(records) { return sumBy(onTripSpending(records), (r) => r.payer, home); }
@@ -43,13 +60,17 @@ export function byCity(records) { return sumBy(onTripSpending(records), (r) => r
  * 每日趨勢。**行程裡沒花錢的那天要出現一個 0**，不能整天消失——
  * 曲線缺一天會讓人以為那天沒記到帳。
  */
-export function dailySeries(records, settings) {
+export function dailySeries(records, settings, opts = {}) {
   const total = tripDays(settings);
   const start = localDay(settings.tripStart);
+  // opts.currency 有給 → 出**當地幣**（只算那個幣別的筆數）；沒給 → 維持本位幣
+  const cur = opts.currency;
+  const value = cur ? local : home;
+  const rows = cur ? localOnly(records, cur) : onTripSpending(records);
   const sums = new Map();
-  for (const r of onTripSpending(records)) {
+  for (const r of rows) {
     const d = localDay(r.date);
-    if (d) sums.set(d, (sums.get(d) || 0) + home(r));
+    if (d) sums.set(d, (sums.get(d) || 0) + value(r));
   }
   if (!total || !start) {
     return [...sums.entries()].sort().map(([date, value]) => ({ date, value }));

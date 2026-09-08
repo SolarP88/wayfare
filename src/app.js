@@ -15,6 +15,7 @@ import {
   todayTotal, tripTotal, preTripTotal, byCategory, byPayment, byCity, byPayer,
   dailySeries, budgetProgress, topSpends, healthCheck, onTripSpending,
   tripTotalLocal, todayTotalLocal, otherCurrencyTotal,
+  byCategoryLocal, byPaymentLocal, byPayerLocal, byCityLocal,
 } from './stats.js';
 import { buildLines, toRecords, isBalanced, decimalsOf } from './split.js';
 import { priceDiscountTotal } from './country-rules/japan.js';
@@ -1002,7 +1003,7 @@ const PAY_COLOR = ['#6F93B5', '#5B8464', '#C97F5E', '#B98098', '#9887BC', '#8C95
  * 甜甜圈。純 SVG，不載任何函式庫（§4：離線也要能看）。
  * 顏色給不到就退回一組固定序列，不會變成看不見的黑圈。
  */
-function donut(rows, colorOf) {
+function donut(rows, colorOf, fmt = homeM) {
   if (!rows.length) return el('div', { className: 'sub', textContent: '還沒有資料' });
   const total = rows.reduce((a, r) => a + Math.abs(r.value), 0);
   if (!total) return el('div', { className: 'sub', textContent: '還沒有資料' });
@@ -1036,7 +1037,7 @@ function donut(rows, colorOf) {
       el('i', { className: 'k', style: `background:${color}` }),
       el('span', { className: 'n', textContent: r.key || '未分類' }),
       el('span', { className: 'p num', textContent: `${(pct * 100).toFixed(1)}%` }),
-      el('span', { className: 'v num', textContent: homeM(r.value) }),
+      el('span', { className: 'v num', textContent: fmt(r.value) }),
     ]));
   });
   return el('div', { className: 'donut' }, [svg, legend]);
@@ -1044,15 +1045,30 @@ function donut(rows, colorOf) {
 
 function renderStats() {
   const R = state.records;
-  const daily = dailySeries(R, state.settings)
+  const cur = state.settings.localCurrency;
+  const f = (v) => amt(v, cur);          // §9：統計頁的數字也是原幣（日圓）
+
+  const daily = dailySeries(R, state.settings, { currency: cur })
     .map((d) => ({ key: `Day ${d.day ?? '-'}　${String(d.date).slice(5)}`, value: d.value }));
-  $('chartDaily').replaceChildren(bars(daily));
-  $('chartCat').replaceChildren(donut(byCategory(R), (k) => CAT_COLOR[k] || CAT_COLOR['其他']));
-  $('chartPay').replaceChildren(donut(byPayment(R), (k, i) => PAY_COLOR[i % PAY_COLOR.length]));
-  $('chartCity').replaceChildren(bars(byCity(R)));
+  $('chartDaily').replaceChildren(bars(daily, f));
+
+  // 非當地幣的現場花費不進這些圖（幣別不同不能相加），但一定要講出來，
+  // 不然她會納悶「為什麼統計加起來跟首頁差一截」。
+  const other = otherCurrencyTotal(R, cur);
+  const note = () => (other
+    ? el('div', { className: 'sub', style: 'margin-bottom:8px', textContent:
+        `另有非${cur}的現場花費 ${homeM(other)} 未列入下面各圖` })
+    : el('span'));
+
+  $('chartCat').replaceChildren(note(),
+    donut(byCategoryLocal(R, cur), (k) => CAT_COLOR[k] || CAT_COLOR['其他'], f));
+  $('chartPay').replaceChildren(
+    donut(byPaymentLocal(R, cur), (k, i) => PAY_COLOR[i % PAY_COLOR.length], f));
+  $('chartCity').replaceChildren(bars(byCityLocal(R, cur), f));
 
   const names = new Map((state.settings.payers || []).map((p) => [p.id, p.name || p.id]));
-  $('chartPayer').replaceChildren(bars(byPayer(R).map((x) => ({ ...x, key: names.get(x.key) || x.key }))));
+  $('chartPayer').replaceChildren(
+    bars(byPayerLocal(R, cur).map((x) => ({ ...x, key: names.get(x.key) || x.key })), f));
 
   $('refundTotal').textContent = local(pendingRefund(R));
 
