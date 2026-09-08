@@ -367,6 +367,10 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
         <input id="quickCustom" type="number" inputmode="numeric" placeholder="金額">
       </div>
       <div class="chips" id="quickCats"></div>
+      <!-- 付款方式：販賣機／置物櫃／公車在日本很多是刷 Suica 的，
+           寫死成現金會讓現金錢包被多扣一次（儲值時已經扣過）。 -->
+      <div class="sub" style="margin:12px 0 6px">怎麼付的</div>
+      <div class="chips" id="quickPay"></div>
       <button class="btn primary wide" id="btnQuickSave" style="margin-top:12px">記一筆</button>
     </div>
 

@@ -783,6 +783,20 @@ function renderScan() {
     b.onclick = () => { $('quickCustom').value = amt; };
     qa.append(b);
   }
+  // 付款方式。**記住上次選的**——坐公車連記三筆不用每次重選，
+  // 這樣還是「兩下完成」，不會把三秒記帳變成五秒。
+  const pays = $('quickPay');
+  pays.textContent = '';
+  for (const m of QUICK_METHODS) {
+    const b = el('button', { className: 'chip', textContent: m });
+    b.setAttribute('aria-pressed', String(m === quickMethod()));
+    b.onclick = () => {
+      try { localStorage.setItem('wayfare-quick-pay', m); } catch { /* 私密視窗 */ }
+      renderScan();
+    };
+    pays.append(b);
+  }
+
   const cats = $('quickCats');
   if (!cats.dataset.built) {
     for (const c of CATEGORIES) {
@@ -829,7 +843,22 @@ function renderDrafts() {
   box.append(card);
 }
 
-/** 三秒快速記帳（§9）：金額 + 類別，兩下完成。沒有照片，不套 needsReview。 */
+/**
+ * 快速記帳的付款方式選項。
+ *
+ * 刻意不放信用卡：快速記帳是給「沒收據的小額」用的（販賣機、置物櫃、公車、賽錢），
+ * 那些場合不會刷卡。放太多選項反而拖慢。
+ */
+const QUICK_METHODS = ['現金', 'Suica', 'PayPay', 'Wise'];
+
+function quickMethod() {
+  try {
+    const m = localStorage.getItem('wayfare-quick-pay');
+    return QUICK_METHODS.includes(m) ? m : '現金';
+  } catch { return '現金'; }
+}
+
+/** 三秒快速記帳（§9）：金額 + 類別 + 付款方式，兩下完成。沒有照片，不套 needsReview。 */
 async function quickSave() {
   const amount = Number($('quickCustom').value);
   if (!amount) { banner('warn', '先填金額'); return; }
@@ -843,7 +872,7 @@ async function quickSave() {
     total: amount,
     currency: state.settings.localCurrency,
     category: cat,
-    paymentMethod: '現金',
+    paymentMethod: quickMethod(),
     payer: state.currentPayer,
     city: cityFromSchedule(now.toISOString(), state.settings.schedule),
     citySource: 'schedule',
@@ -854,7 +883,7 @@ async function quickSave() {
   await db.saveReceipt(receipt, toRecords(receipt, buildLines(receipt).lines));
   $('quickCustom').value = '';
   await reload();
-  banner('info', `已記一筆 ${local(amount)}（${cat}）`);
+  banner('info', `已記一筆 ${local(amount)}（${cat} · ${quickMethod()}）`);
   renderScan();
 }
 
