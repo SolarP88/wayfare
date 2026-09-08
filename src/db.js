@@ -276,6 +276,25 @@ export async function saveSettings(settings) {
 }
 
 // ---------------------------------------------------------------------------
+// 封面照（§9 首頁頂部）
+//
+// 放在 settings store 的另一把鑰匙（id: 'cover'），不占 photos store——
+// photos 那邊是「收據的憑據」，健檢與匯出都會掃它，混進一張風景照只會添亂。
+// ---------------------------------------------------------------------------
+
+export async function putCover(blob) {
+  return put(STORES.settings, { id: 'cover', blob, at: new Date().toISOString() });
+}
+
+export async function getCover() {
+  return get(STORES.settings, 'cover');
+}
+
+export async function clearCover() {
+  return del(STORES.settings, 'cover');
+}
+
+// ---------------------------------------------------------------------------
 // 照片
 // ---------------------------------------------------------------------------
 

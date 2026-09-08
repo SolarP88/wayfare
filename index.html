@@ -132,6 +132,19 @@ button,select,input,textarea{font:inherit;color:inherit}
 
 /* 首頁 hero 2×2 */
 .hero{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin:0 0 14px}
+/* 封面照。文字壓在圖上，所以底部一定要有漸層，不然遇到亮色照片就看不見字。 */
+#coverBox{position:relative;border-radius:var(--radius);overflow:hidden;margin:0 0 12px;
+  box-shadow:var(--shadow);background:var(--sunk)}
+#coverImg{display:block;width:100%;height:158px;object-fit:cover}
+.covertext{position:absolute;left:0;right:0;bottom:0;padding:26px 15px 13px;
+  background:linear-gradient(to top,rgba(10,12,15,.72),rgba(10,12,15,.32) 55%,transparent)}
+.covertext .ct{color:#fff;font-size:20px;font-weight:700;letter-spacing:-.01em;
+  text-shadow:0 1px 3px rgba(0,0,0,.35)}
+.covertext .cs{color:rgba(255,255,255,.88);font-size:13.5px;margin-top:2px;
+  text-shadow:0 1px 3px rgba(0,0,0,.35)}
+#coverPreview{width:100%;height:120px;object-fit:cover;border-radius:14px;
+  border:1px solid var(--line);margin-bottom:10px}
+
 .tile{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
       padding:13px 14px 14px;box-shadow:var(--shadow)}
 .tile .top{display:flex;align-items:center;gap:8px;margin-bottom:9px}
@@ -277,6 +290,14 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 
   <!-- 首頁 ------------------------------------------------------------ -->
   <section id="tab-home">
+    <!-- 封面照：她自己選一張。沒選就整塊不出現，不留一個空框。 -->
+    <div id="coverBox" hidden>
+      <img id="coverImg" alt="">
+      <div class="covertext">
+        <div class="ct" id="coverTitle"></div>
+        <div class="cs" id="coverSub"></div>
+      </div>
+    </div>
     <!-- hero 2×2：一眼看到四個數字，不用捲 -->
     <div class="hero">
       <div class="tile" style="--tc:#C97F5E">
@@ -434,6 +455,17 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
   <!-- 設定 ------------------------------------------------------------ -->
   <section id="tab-settings" hidden>
     <div class="card"><strong>基本</strong><div id="settingsBasic"></div></div>
+    <div class="card"><strong>封面照</strong>
+      <div class="sub" style="margin:6px 0 12px">首頁最上面那張。挑一張這趟最喜歡的。</div>
+      <img id="coverPreview" hidden alt="">
+      <input type="file" id="coverFile" accept="image/*" hidden>
+      <div class="row" style="gap:10px">
+        <button class="btn" id="btnCoverPick" style="flex:1">選一張照片</button>
+        <button class="btn danger" id="btnCoverClear" style="flex:1" hidden>移除</button>
+      </div>
+      <div class="sub" style="margin-top:8px" id="coverOut"></div>
+    </div>
+
     <div class="card"><strong>外觀</strong>
       <div class="sub" style="margin:6px 0 12px">雪地反光看不清就切淺色，晚上切深色。只影響這台手機。</div>
       <div class="chips" id="themeChips"></div>

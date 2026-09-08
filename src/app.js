@@ -278,7 +278,30 @@ function wireHome() {
     });
 }
 
+/**
+ * 首頁封面。圖存在 IndexedDB，用 objectURL 顯示；
+ * 每次重畫都要把上一個 URL 收掉，不然一天下來會漏一堆記憶體。
+ */
+let coverUrl = null;
+async function renderCover() {
+  const row = await db.getCover();
+  const box = $('coverBox');
+  if (coverUrl) { URL.revokeObjectURL(coverUrl); coverUrl = null; }
+  if (!row?.blob) { box.hidden = true; return; }
+
+  coverUrl = URL.createObjectURL(row.blob);
+  $('coverImg').src = coverUrl;
+  const s = state.settings;
+  const n = dayOfTrip(todayLocal(), s);
+  $('coverTitle').textContent = s.tripName?.trim() || '這趟旅行';
+  $('coverSub').textContent = n
+    ? `Day ${n} · ${withWeekday(todayLocal())}`
+    : (s.tripStart ? `${s.tripStart} ~ ${s.tripEnd}` : '');
+  box.hidden = false;
+}
+
 function renderHome() {
+  renderCover();
   const s = state.settings;
   // 兩位並排，各自的餘額直接寫在 chip 上——不用切換就看得到對方剩多少
   const tabs = $('payerTabs');
@@ -1352,6 +1375,31 @@ function wireSettings() {
     $('healthOut').replaceChildren(box);
   };
 
+  $('btnCoverPick').onclick = () => $('coverFile').click();
+  $('coverFile').onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      // 壓到 1200px：手機拍的原圖動輒 4MB，首頁那塊只有 158px 高，存原圖純浪費空間
+      const shot = await compress(file, 1200, 0.8);
+      await db.putCover(shot.blob);
+      $('coverOut').textContent =
+        `已設定（${Math.round(shot.size / 1024)} KB，原圖 ${Math.round(shot.originalSize / 1024)} KB）`;
+      await renderSettingsCover();
+      renderCover();
+    } catch (err) {
+      $('coverOut').textContent = `這張圖處理失敗：${err.message}`;
+    }
+  };
+  $('btnCoverClear').onclick = async () => {
+    if (!confirm('移除封面照？')) return;
+    await db.clearCover();
+    $('coverOut').textContent = '已移除';
+    await renderSettingsCover();
+    renderCover();
+  };
+
   $('btnXlsx').onclick = exportExcel;
   $('btnBackup').onclick = exportBackup;
   $('btnRestore').onclick = () => $('restoreFile').click();
@@ -1360,6 +1408,7 @@ function wireSettings() {
 
 function renderSettings() {
   renderThemeChips();
+  renderSettingsCover();
   const basic = $('settingsBasic'); basic.textContent = '';
   settingField(basic, 'tripName', '行程名稱（首頁最上面那行）', 'text');
   settingField(basic, 'homeCurrency', '本位幣', 'text', ['SGD', 'MYR', 'TWD', 'USD', 'EUR']);
@@ -1501,6 +1550,23 @@ function renderSettings() {
  * 原本那條「刷卡匯率 未完成」會永遠綠不了，逼人去填一個不會用到的數字——
  * 一張永遠不會全綠的清單，看久了就整張都不看了。
  */
+/** 設定頁的封面預覽。跟首頁分開一個 objectURL，各自收各自的。 */
+let coverPreviewUrl = null;
+async function renderSettingsCover() {
+  const row = await db.getCover();
+  const img = $('coverPreview');
+  if (coverPreviewUrl) { URL.revokeObjectURL(coverPreviewUrl); coverPreviewUrl = null; }
+  if (!row?.blob) {
+    img.hidden = true;
+    $('btnCoverClear').hidden = true;
+    return;
+  }
+  coverPreviewUrl = URL.createObjectURL(row.blob);
+  img.src = coverPreviewUrl;
+  img.hidden = false;
+  $('btnCoverClear').hidden = false;
+}
+
 function renderPreflight() {
   const pf = $('preflight'); pf.textContent = '';
   const s = state.settings;
@@ -1569,9 +1635,11 @@ async function exportBackup() {
     const ps = await db.photosOf(rc.id);
     if (ps.length) photosByRecord.set(rc.id, await Promise.all(ps.map((p) => toBase64(p.blob))));
   }
+  const coverRow = await db.getCover();
   const backup = buildBackup({
     records: state.records, receipts: state.receipts,
     walletOps: state.wallet, settings: state.settings, photosByRecord,
+    cover: coverRow?.blob ? await toBase64(coverRow.blob) : null,
   });
   download(new Blob([JSON.stringify(backup)], { type: 'application/json' }),
            `旅行記帳_備份_${stamp()}.json`);
@@ -1630,6 +1698,10 @@ async function importBackup(e) {
   // 設定也要跟著搬（匯率、行程、付款人、Wise 初始…）。
   // ⚠️ **API key 不在備份檔裡**（刻意的，key 不進備份），所以保留這台自己的，
   //    不要用備份裡的 undefined 把它蓋掉——那會讓辨識突然停擺。
+  if (b.cover) {
+    try { await db.putCover(fromBase64(b.cover)); } catch { /* 封面壞掉不該擋住整份匯入 */ }
+  }
+
   if (b.settings) {
     const here = await db.get(db.STORES.settings, 'main');
     await db.saveSettings({ ...b.settings, apiKey: here?.apiKey || '' });
