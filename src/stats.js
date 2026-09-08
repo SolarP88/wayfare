@@ -188,14 +188,31 @@ export function findDuplicates(records, withinMinutes = 10) {
   return dups;
 }
 
-/** 一鍵健檢（§17.3）：一頁列出所有可疑的。 */
-export function healthCheck(records, settings) {
+/**
+ * 一鍵健檢（§17.3）：一頁列出所有可疑的。**回收據 id**，畫面才點得進去。
+ *
+ * 2026-09-08 修好三個假警報：
+ *   · 「待確認」沒看 `reviewed` —— 確認過了還一直算進去
+ *   · 「掃描但沒照片」看的是 `r.photos`，**紀錄上根本沒有這個欄位**
+ *     （照片存在另一個 store），等於每一筆掃描都被誣賴成沒照片
+ *   · 「匯率沒設完」硬要刷卡匯率 —— 這趟不刷信用卡的人永遠消不掉
+ *
+ * @param opts.photoReceiptIds Set<收據id>；**沒給就不檢查照片**（不知道就別亂報）
+ * @param opts.missingRates    由呼叫端算好「用得到的匯率有沒有缺」
+ */
+export function healthCheck(records, settings, opts = {}) {
+  const rid = (r) => r.receiptId || r.id;
+  const byReceipt = (rows) => [...new Set(rows.map(rid))];
+  const photoIds = opts.photoReceiptIds || null;
+
   return {
-    needsReview: records.filter((r) => r.needsReview).map((r) => r.id),
-    cityFromSchedule: records.filter((r) => r.citySource === 'schedule').map((r) => r.id),
-    noPhoto: records.filter((r) => r.entryMode === 'scan' && !(r.photos || []).length).map((r) => r.id),
-    noHomeAmount: records.filter((r) => r.amountHome == null).map((r) => r.id),
+    needsReview: byReceipt(records.filter((r) => r.needsReview && !r.reviewed)),
+    cityFromSchedule: byReceipt(records.filter((r) => r.citySource === 'schedule')),
+    noPhoto: photoIds
+      ? byReceipt(records.filter((r) => r.entryMode === 'scan' && !photoIds.has(rid(r))))
+      : [],
+    noHomeAmount: byReceipt(records.filter((r) => r.amountHome == null)),
     duplicates: findDuplicates(records),
-    missingRates: !settings.cashRate || !settings.cardRate,
+    missingRates: opts.missingRates ?? !(settings.cashRate > 0),
   };
 }

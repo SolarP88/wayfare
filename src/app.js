@@ -1215,23 +1215,64 @@ function wireSettings() {
     }
   };
 
-  $('btnHealth').onclick = () => {
-    const h = healthCheck(state.records, state.settings);
-    const lines = [
-      [`待確認（紅點）`, h.needsReview.length],
-      [`城市是用行程推的（可能歸錯）`, h.cityFromSchedule.length],
-      [`掃描但沒照片`, h.noPhoto.length],
-      [`算不出本位幣金額`, h.noHomeAmount.length],
-      [`疑似重複`, h.duplicates.length],
+  $('btnHealth').onclick = async () => {
+    // 照片存在另一個 store，健檢要自己去撈——不撈的話每一筆掃描都會被誣賴成沒照片
+    const photoReceiptIds = new Set(
+      (await db.all(db.STORES.photos)).map((p) => p.receiptId || p.recordId));
+    const missing = ratesNeeded().filter(([, ok]) => !ok).map(([label]) => label);
+
+    const h = healthCheck(state.records, state.settings, {
+      photoReceiptIds,
+      missingRates: missing.length > 0,
+    });
+
+    const rows = [
+      ['待確認（紅點）', h.needsReview, '確認過就會消失'],
+      ['城市是用行程推的（可能歸錯）', h.cityFromSchedule, 'GPS 沒抓到時的備援'],
+      ['掃描但沒照片', h.noPhoto, '照片是回來報帳的憑據'],
+      ['算不出本位幣金額', h.noHomeAmount, '多半是匯率還沒設'],
     ];
+
     const box = el('div');
-    for (const [label, n] of lines) {
-      box.append(el('div', { className: 'row' }, [
-        el('span', { textContent: label }),
+    for (const [label, ids, why] of rows) {
+      const n = ids.length;
+      const head = el('div', { className: 'row', style: n ? 'cursor:pointer' : '' }, [
+        el('span', { textContent: n ? `${label} ▾` : label }),
         el('strong', { className: n ? 'warn' : 'good', textContent: String(n) }),
+      ]);
+      box.append(head);
+      if (!n) continue;
+
+      // ⚠️ 只給數字等於沒說（她 2026-09-08：「沒告訴我是什麼」）。
+      //    列出是哪幾張，而且點得進去改。
+      const list = el('div', { style: 'margin:2px 0 10px 2px' });
+      list.append(el('div', { className: 'sub', textContent: why }));
+      for (const id of ids) {
+        const rc = state.receipts.find((x) => x.id === id);
+        const line = el('div', { className: 'sub', style: 'padding:6px 0;cursor:pointer;color:var(--accent)' });
+        line.textContent = rc
+          ? `${String(rc.date || '').slice(5, 16).replace('T', ' ')}　${rc.storeName || '(未命名)'}　${amt(rc.total, rc.currency)}`
+          : id;
+        line.onclick = () => { $('dlg')?.close?.(); openReceipt(id, 'settings'); };
+        list.append(line);
+      }
+      box.append(list);
+    }
+
+    if (h.duplicates.length) {
+      box.append(el('div', { className: 'row' }, [
+        el('span', { textContent: '疑似重複（同金額、時間很近）' }),
+        el('strong', { className: 'warn', textContent: String(h.duplicates.length) }),
       ]));
     }
-    if (h.missingRates) box.append(el('div', { className: 'banner warn', textContent: '匯率沒設完' }));
+
+    if (missing.length) {
+      box.append(el('div', { className: 'banner warn', textContent:
+        `${missing.join('、')}還沒設 —— 這趟用得到的匯率才會列在這裡` }));
+    }
+    if (!rows.some(([, ids]) => ids.length) && !h.duplicates.length && !missing.length) {
+      box.append(el('div', { className: 'banner info', textContent: '都沒問題 ✓' }));
+    }
     $('healthOut').replaceChildren(box);
   };
 
