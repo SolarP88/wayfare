@@ -16,7 +16,7 @@
 // ---------------------------------------------------------------------------
 
 export const CATEGORIES = ['餐飲', '交通', '購物', '門票', '住宿', '藥品', '其他'];
-export const PAYMENT_METHODS = ['現金', '信用卡', 'Suica', 'PayPay', '其他'];
+export const PAYMENT_METHODS = ['現金', 'Wise', '信用卡', 'Suica', 'PayPay', '其他'];
 export const ENTRY_MODES = ['scan', 'quick', 'manual'];
 
 export const CURRENCY_SYMBOLS = {
@@ -37,11 +37,12 @@ export function defaultSettings() {
     budgetSourceNote: '',
     cashRate: null,             // 1 本位幣 = ? 當地幣（換現金時實際拿到的）
     cardRate: null,             // 1 本位幣 = ? 當地幣（銀行約略）
+    wiseRate: null,             // 1 本位幣 = ? 當地幣（換進 Wise 時拿到的）。沒填就套現金匯率
     referenceRate: null,        // 按「更新參考匯率」抓到的市場價，僅供參考
     referenceRateAt: null,
     payers: [
-      { id: 'p1', name: '我', initialCash: 0 },
-      { id: 'p2', name: '', initialCash: 0 },
+      { id: 'p1', name: '我', initialCash: 0, initialWise: 0 },
+      { id: 'p2', name: '', initialCash: 0, initialWise: 0 },
     ],
     schedule: [],               // [{ city, from, to }]
     quickAmounts: [100, 150, 500],
@@ -85,7 +86,11 @@ export function dayOfTrip(dateish, settings) {
  */
 export function toHome(amountLocal, paymentMethod, settings) {
   if (amountLocal == null) return null;
-  const rate = paymentMethod === '信用卡' ? settings.cardRate : settings.cashRate;
+  // Wise 裡是**出發前就換好的日圓**，成本是換匯當下那個匯率，不是刷卡當下的銀行匯率。
+  // 沒填 Wise 匯率就退回現金匯率——那也比刷卡匯率接近（都是「先換好的錢」）。
+  const rate = paymentMethod === '信用卡' ? settings.cardRate
+    : paymentMethod === 'Wise' ? (settings.wiseRate || settings.cashRate)
+    : settings.cashRate;
   if (!rate || rate <= 0) return null;
   return amountLocal / rate;
 }

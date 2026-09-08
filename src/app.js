@@ -10,7 +10,7 @@ import {
   defaultSettings, derive, symbolOf, localDay, tripDays, dayOfTrip, isSpending,
   CATEGORIES, PAYMENT_METHODS,
 } from './model.js';
-import { cashBalance, makeCorrection, cashBurn, pendingRefund } from './wallet.js';
+import { cashBalance, potBalance, makeCorrection, cashBurn, pendingRefund } from './wallet.js';
 import {
   todayTotal, tripTotal, preTripTotal, byCategory, byPayment, byCity, byPayer,
   dailySeries, budgetProgress, topSpends, healthCheck, onTripSpending,
@@ -194,6 +194,25 @@ function wireHome() {
       await reload(); render();
       banner(op.delta === 0 ? 'info' : 'warn', `校正完成：${op.note}`);
     });
+
+  $('btnWiseTopup').onclick = () => askAmount(
+    '儲值 Wise', '這次換了多少日圓進 Wise？', async (amount) => {
+      await db.put(db.STORES.wallet, {
+        type: 'topup', pot: 'wise', payerId: state.currentPayer,
+        amount, at: new Date().toISOString(),
+      });
+      await reload(); render();
+    });
+  $('btnWiseCorrect').onclick = () => askAmount(
+    '校正 Wise', '打開 Wise App 看一下，日圓餘額現在是多少？', async (actual) => {
+      const op = makeCorrection({
+        payerId: state.currentPayer, pot: 'wise', actualBalance: actual,
+        records: state.records, walletOps: state.wallet, settings: state.settings,
+      });
+      await db.put(db.STORES.wallet, op);
+      await reload(); render();
+      banner(op.delta === 0 ? 'info' : 'warn', `Wise 校正完成：${op.note}`);
+    });
 }
 
 function renderHome() {
@@ -207,6 +226,19 @@ function renderHome() {
 
   const bal = cashBalance(state.currentPayer, state.records, state.wallet, s);
   $('cash').textContent = local(bal);
+
+  // Wise：沒在用的人不要看到這一段（首頁越少東西越好）
+  const wiseUsed = state.wallet.some((w) => w.pot === 'wise')
+    || state.records.some((r) => r.paymentMethod === 'Wise');
+  $('wiseRow').hidden = !wiseUsed;
+  if (wiseUsed) {
+    const wiseBal = potBalance(state.currentPayer, 'wise', state.records, state.wallet, s);
+    $('wise').textContent = local(wiseBal);
+    const rate = s.wiseRate || s.cashRate;
+    $('wiseHint').textContent = rate
+      ? `約 ${homeM(wiseBal / rate)}${s.wiseRate ? '' : '（用現金匯率估，Wise 匯率還沒填）'}`
+      : '匯率還沒設';
+  }
 
   const burn = cashBurn(state.currentPayer, state.records, state.wallet, s, todayLocal());
   if (!burn) {
@@ -1089,6 +1121,9 @@ function renderSettings() {
     '換現金和刷卡的成本不一樣，所以分兩個。' }));
   settingField(fx, 'cashRate', '現金匯率', 'number');
   settingField(fx, 'cardRate', '刷卡匯率', 'number');
+  settingField(fx, 'wiseRate', 'Wise 匯率（換進 Wise 時拿到的）', 'number');
+  fx.append(el('div', { className: 'sub', textContent:
+    'Wise 匯率沒填就套現金匯率——兩者都是「先換好的錢」，比刷卡匯率接近。' }));
 
   const payers = $('settingsPayers'); payers.textContent = '';
   (state.settings.payers || []).forEach((p, i) => {
@@ -1111,14 +1146,31 @@ function renderSettings() {
       state.settings.payers[i].initialCash = amount;
       await db.saveSettings(state.settings);
       // 初始現金是一筆錢包操作，不是純設定——否則餘額算不出來
-      const existing = state.wallet.find((w) => w.type === 'init' && w.payerId === p.id);
+      const existing = state.wallet.find(
+        (w) => w.type === 'init' && w.payerId === p.id && (w.pot || 'cash') === 'cash');
       await db.put(db.STORES.wallet, existing
         ? { ...existing, amount }
-        : { type: 'init', payerId: p.id, amount, at: new Date().toISOString() });
+        : { type: 'init', pot: 'cash', payerId: p.id, amount, at: new Date().toISOString() });
       await reload(); render();
     };
     cashW.append(cash);
-    payers.append(nameW, cashW);
+
+    const wiseW = el('div', { className: 'field' }, [el('label', { textContent: 'Wise 初始日圓（沒用留 0）' })]);
+    const wise = el('input', { type: 'number', inputMode: 'numeric', value: p.initialWise || 0 });
+    wise.onchange = async () => {
+      const amount = Number(wise.value);
+      state.settings.payers[i].initialWise = amount;
+      await db.saveSettings(state.settings);
+      const existing = state.wallet.find(
+        (w) => w.type === 'init' && w.payerId === p.id && (w.pot || 'cash') === 'wise');
+      await db.put(db.STORES.wallet, existing
+        ? { ...existing, amount }
+        : { type: 'init', pot: 'wise', payerId: p.id, amount, at: new Date().toISOString() });
+      await reload(); render();
+    };
+    wiseW.append(wise);
+
+    payers.append(nameW, cashW, wiseW);
   });
 
   const sch = $('settingsSchedule'); sch.textContent = '';

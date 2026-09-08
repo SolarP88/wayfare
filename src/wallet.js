@@ -18,50 +18,67 @@ export const WALLET_OPS = {
 };
 
 /**
- * 一筆紀錄會不會動到現金錢包。
+ * 錢包有兩個罐子（§11，2026-09-08 加了 Wise）：
+ *   · cash —— 手上的實體日圓現鈔
+ *   · wise —— Wise 卡裡**出發前就換好的**日圓
+ * 兩個都是「先換好的一包當地幣，花完就沒了」，但**互不影響**：
+ * 刷 Wise 不會讓手上的現鈔變少，反過來也是。
+ */
+export const POTS = { cash: '現金', wise: 'Wise' };
+
+/**
+ * 這一筆會不會動到某個罐子。
  *
  * ⚠️ 三個容易搞錯的地方：
- *   · **儲值會扣錢包**。用現金儲 Suica，現金確實變少了——
+ *   · **儲值會扣現金**。用現金儲 Suica，現金確實變少了——
  *     它不算「花費」（model.isSpending 排除它），但一定算「現金流出」。
- *     這兩件事分開判斷，不可以共用一個旗標。
- *   · **免税消費扣全額（含稅）**。新制在店裡是真的付了含稅價（§7.3），
- *     退税是之後的獨立收入。當下扣未稅價 = 餘額憑空多出一截。
- *   · **錢包裝的是當地幣**（§11）。在新加坡用 SGD 現金付的機票，動到的是她的
- *     新幣現金，不是日圓錢包——不看幣別的話，那筆 1,200 會被當成 1,200 円扣掉。
- *     2026-09-08 實跑撞到（250,000 − 780 − 150 − **1,200** = 247,870）。
+ *   · **免税消費扣全額（含稅）**。新制在店裡是真的付了含稅價（§7.3）。
+ *   · **罐子裝的是當地幣**。在新加坡用 SGD 現金付的機票，動到的是新幣現金，
+ *     不是日圓錢包（2026-09-08 實跑撞到）。
  *
  * @param settings 有給就比幣別；沒給就只看支付方式（舊呼叫端的行為）
  */
-export function affectsCash(r, settings) {
-  if (r.paymentMethod !== '現金') return false;
+export function affectsPot(r, pot, settings) {
   const wallet = settings?.localCurrency;
-  if (!wallet) return true;
-  // derive() 會把空的 currency 補成當地幣，所以這裡的 fallback 跟它一致
-  return (r.currency || wallet) === wallet;
+  if (wallet && (r.currency || wallet) !== wallet) return false;
+  return r.paymentMethod === (pot === 'wise' ? 'Wise' : '現金');
+}
+
+/** 舊名字，留著給既有呼叫端與測試用。 */
+export function affectsCash(r, settings) {
+  return affectsPot(r, 'cash', settings);
 }
 
 /**
- * 算某位付款人的現金餘額。
+ * 算某位付款人某個罐子的餘額。
  *
- * 餘額 = Σ(錢包操作) − Σ(該付款人的現金支出)
+ * 餘額 = Σ(這個罐子的錢包操作) − Σ(該付款人、走這個罐子的消費)
  *   · init / topup / refund：直接加
  *   · correct：加上「校正差額」（delta），差額本身在建立這筆操作時就算好並存起來，
  *     不是每次重算——因為校正的意義是「那個當下實際數到多少」，
  *     事後補記了漏掉的消費，不應該讓歷史校正跟著變。
  *
+ * ⚠️ 沒有 `pot` 的錢包操作一律當成現金（2026-09-08 之前存的都沒有這個欄位）。
+ *
  * 金額允許負數（退貨／退款），所以退款自然會加回來，不用另外處理。
  */
-export function cashBalance(payerId, records, walletOps, settings) {
+export function potBalance(payerId, pot, records, walletOps, settings) {
   let bal = 0;
   for (const op of walletOps) {
     if (op.payerId !== payerId) continue;
+    if ((op.pot || 'cash') !== pot) continue;
     bal += op.type === 'correct' ? (op.delta || 0) : (op.amount || 0);
   }
   for (const r of records) {
-    if (r.payer !== payerId || !affectsCash(r, settings)) continue;
+    if (r.payer !== payerId || !affectsPot(r, pot, settings)) continue;
     bal -= r.amount || 0;
   }
   return bal;
+}
+
+/** 現金罐子。介面保持原樣，既有呼叫端不用改。 */
+export function cashBalance(payerId, records, walletOps, settings) {
+  return potBalance(payerId, 'cash', records, walletOps, settings);
 }
 
 /**
@@ -70,12 +87,13 @@ export function cashBalance(payerId, records, walletOps, settings) {
  * 差額**記成「未記錄支出」而不是假裝沒發生**（§16 第 1 條）——
  * 9 天一定會有漏記，沒有校正機制餘額會越走越偏，到後面就沒人信它了。
  */
-export function makeCorrection({ payerId, actualBalance, records, walletOps, settings, at, note }) {
-  const current = cashBalance(payerId, records, walletOps, settings);
+export function makeCorrection({ payerId, pot = 'cash', actualBalance, records, walletOps, settings, at, note }) {
+  const current = potBalance(payerId, pot, records, walletOps, settings);
   const delta = actualBalance - current;
   return {
     type: 'correct',
     payerId,
+    pot,
     at: at || new Date().toISOString(),
     actualBalance,
     previousBalance: current,

@@ -297,6 +297,20 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
         <button class="btn" id="btnTopup" style="flex:1">補充現金</button>
         <button class="btn" id="btnCorrect" style="flex:1">校正餘額</button>
       </div>
+
+      <!-- Wise 是第二個罐子：一樣是先換好的日圓，但刷它不會讓手上的現鈔變少。
+           沒在用的人不會看到這一段（app.js 判斷有沒有用過才顯示）。 -->
+      <div id="wiseRow" hidden style="margin-top:16px;border-top:1px solid var(--line);padding-top:13px">
+        <div class="row">
+          <div class="muted">Wise 卡</div>
+          <div class="big num" id="wise" style="font-size:26px">—</div>
+        </div>
+        <div class="sub" id="wiseHint"></div>
+        <div class="row" style="margin-top:12px;gap:10px">
+          <button class="btn" id="btnWiseTopup" style="flex:1">儲值 Wise</button>
+          <button class="btn" id="btnWiseCorrect" style="flex:1">校正 Wise</button>
+        </div>
+      </div>
     </div>
 
     <div class="row" style="margin:16px 2px 9px">
