@@ -79,7 +79,7 @@ export function topSpends(records, n = 10) {
     .slice()
     .sort((a, b) => home(b) - home(a))
     .slice(0, n)
-    .map((r) => ({ id: r.id, storeName: r.storeName, date: r.date, amount: local(r), amountHome: home(r) }));
+    .map((r) => ({ id: r.id, storeName: r.storeName, name: r.name, date: r.date, amount: local(r), amountHome: home(r) }));
 }
 
 /**
@@ -101,12 +101,30 @@ export function budgetProgress(records, settings) {
 }
 
 /**
+ * 把同一張收據的品項先收成一筆。
+ *
+ * ⚠️ 拆多筆之後**一定要先收**再比重複（2026-09-08）：
+ * 一張超市收據裡兩瓶 ¥198 的茶，時間金額都一樣，逐筆比會判成「重複」——
+ * 那不是拍兩次，那是真的買了兩瓶。要抓的是「同一張拍了兩次」。
+ */
+function collapseReceipts(records) {
+  const out = new Map();
+  for (const r of records) {
+    const k = r.receiptId || r.id;
+    const cur = out.get(k);
+    if (!cur) { out.set(k, { ...r, id: k }); continue; }
+    cur.amount = (cur.amount || 0) + (r.amount || 0);
+  }
+  return [...out.values()];
+}
+
+/**
  * 疑似重複（§16 第 11 條、§17.2）：金額相同且時間很近。
  * 連拍時同一張拍兩次很常見，尤其戴手套。
  */
 export function findDuplicates(records, withinMinutes = 10) {
   const dups = [];
-  const sorted = records
+  const sorted = collapseReceipts(records)
     .filter((r) => r.amount && Number.isFinite(Date.parse(r.date)))
     .sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
 

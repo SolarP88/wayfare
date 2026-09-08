@@ -281,6 +281,33 @@ taxType 就填 \`免税\`，不要填成内税或外税。**
 }
 \`\`\``;
 
+
+// ---------------------------------------------------------------------------
+// 折扣分兩類（上面 prompt 的「折扣分兩種」那段，程式版）
+//
+// A 價格折扣（割引／値引／タイムセール）：商品本身變便宜，**進合計的算式**，
+//   所以拆帳時要攤到各品項上。
+// B 付款端折抵（ポイント利用／商品券／キャッシュレス還元）：合計沒變，
+//   只是掏出去的錢變少 —— **不可以攤到品項**，攤了品項加總就不等於合計。
+// ---------------------------------------------------------------------------
+const PRICE_DISCOUNTS = ['割引', '値引', 'タイムセール', '割引券'];
+
+export function isPriceDiscount(type) {
+  return PRICE_DISCOUNTS.some((k) => String(type || '').includes(k));
+}
+
+export function priceDiscountTotal(discounts) {
+  return (discounts || [])
+    .filter((d) => isPriceDiscount(d.type))
+    .reduce((s, d) => s + Math.abs(d.amount || 0), 0);
+}
+
+export function tenderDiscountTotal(discounts) {
+  return (discounts || [])
+    .filter((d) => !isPriceDiscount(d.type))
+    .reduce((s, d) => s + Math.abs(d.amount || 0), 0);
+}
+
 /**
  * §17.1 輸入層防呆。
  *
@@ -375,15 +402,8 @@ export function validate(r, ctx = {}) {
   // ポイント利用／商品券是**付款方式**——它讓現金少付，但不改變合計。
   // 把它算進折扣，會讓每一張用點數的收據都誤報成「驗算對不上」。
   // 價格折扣才影響合計；付款端折抵（點數、無現金回饋、商品券）只影響掏出去的錢。
-  const PRICE_DISCOUNTS = ['割引', '値引', 'タイムセール', '割引券'];
-  const isPriceDiscount = (t) =>
-    PRICE_DISCOUNTS.some((k) => String(t || '').includes(k));
-  const disc = (r.discounts || [])
-    .filter((d) => isPriceDiscount(d.type))
-    .reduce((s, d) => s + Math.abs(d.amount || 0), 0);
-  const tender = (r.discounts || [])
-    .filter((d) => !isPriceDiscount(d.type))
-    .reduce((s, d) => s + Math.abs(d.amount || 0), 0);
+  const disc = priceDiscountTotal(r.discounts);
+  const tender = tenderDiscountTotal(r.discounts);
 
   // 内税和外税的等式不一樣，套錯會製造假警報：
   //   外税 小計 + 稅 − 折扣 = 合計

@@ -15,12 +15,16 @@ import {
   todayTotal, tripTotal, preTripTotal, byCategory, byPayment, byCity, byPayer,
   dailySeries, budgetProgress, topSpends, healthCheck, onTripSpending,
 } from './stats.js';
+import { buildLines, toRecords, isBalanced } from './split.js';
+import { priceDiscountTotal } from './country-rules/japan.js';
 import * as db from './db.js';
 import { createQueue, STATUS } from './queue.js';
 import { configureRateLimit } from './gemini.js';
 import { compress, toBase64, getCoords, cityFromSchedule, parseSchedule } from './camera.js';
 import { fetchReferenceRate, compareToSettings } from './fx.js';
-import { buildWorkbook, toCSV, buildBackup, parseBackup } from './export.js';
+import {
+  buildWorkbook, toCSV, buildBackup, parseBackup, receiptsFromLegacyRecords,
+} from './export.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, kids = []) => {
@@ -31,7 +35,11 @@ const el = (tag, props = {}, kids = []) => {
 
 const state = {
   settings: defaultSettings(),
-  records: [],
+  records: [],          // 一個品項一筆，**只含已確認的**（草稿不進統計）
+  receipts: [],
+  drafts: [],           // 辨識完還沒確認的收據
+  confirmDraft: null,   // 確認頁正在編的那一張（記憶體副本，按存才寫回）
+  returnTab: 'records',
   wallet: [],
   tab: 'home',
   filter: { category: null, payer: null, payment: null, city: null },
@@ -90,9 +98,21 @@ async function boot() {
 }
 
 async function reload() {
-  state.records = (await db.allRecords()).map((r) => derive(r, state.settings));
+  const lines = await db.allRecords();
+  state.receipts = await db.allReceipts();
+  state.drafts = state.receipts.filter((r) => r.status === db.RECEIPT_STATUS.draft);
+  const draftIds = new Set(state.drafts.map((r) => r.id));
+
+  // 草稿不進統計、不動錢包（2026-09-08 她的決定：數字永遠是她確認過的）。
+  // 沒有 receiptId 的是 v1 舊資料，migration 會補上，這裡照樣放行。
+  state.records = lines
+    .filter((r) => !draftIds.has(r.receiptId))
+    .map((r) => derive(r, state.settings));
   state.wallet = await db.all(db.STORES.wallet);
 }
+
+/** 這張收據底下、已經在記憶體裡的那幾筆品項。 */
+const linesOf = (receiptId) => state.records.filter((r) => r.receiptId === receiptId);
 
 function banner(kind, text) {
   $('banners').append(el('div', { className: `banner ${kind}`, textContent: text }));
@@ -116,14 +136,15 @@ function wireTabs() {
 }
 
 function render() {
-  for (const name of ['home', 'records', 'scan', 'manual', 'stats', 'settings']) {
+  for (const name of ['home', 'records', 'scan', 'manual', 'stats', 'settings', 'confirm']) {
     $(`tab-${name}`).hidden = name !== state.tab;
   }
   renderHeader();
   clearBanners();
   renderWarnings();
   ({ home: renderHome, records: renderRecords, scan: renderScan,
-     manual: renderManual, stats: renderStats, settings: renderSettings }[state.tab])();
+     manual: renderManual, stats: renderStats, settings: renderSettings,
+     confirm: renderConfirm }[state.tab])();
 }
 
 function renderHeader() {
@@ -142,6 +163,10 @@ function renderWarnings() {
   if (!s.apiKey) banner('bad', '還沒填 API key，拍照無法辨識。去設定頁貼上。');
   if (!s.cashRate || !s.cardRate) banner('warn', '匯率還沒設，本位幣金額會顯示「—」。');
   if (!s.tripStart || !s.tripEnd) banner('warn', '還沒設行程起訖日，Day N、每日曲線、行前判斷都不會動。');
+  // 沒確認的收據**不算進任何數字**，所以這條要顯眼——忘了確認，首頁會少一截。
+  if (state.drafts.length) {
+    banner('warn', `有 ${state.drafts.length} 張收據還沒確認，先不計入統計與現金錢包。去掃描頁確認。`);
+  }
   const red = state.records.filter((r) => r.needsReview && !r.reviewed).length;
   if (red) banner('info', `有 ${red} 筆待確認（辨識驗算對不上），有空的時候點紅點進去修。`);
 }
@@ -245,8 +270,12 @@ function recRow(r, showDate = false) {
   const meta = el('div', { className: 'meta' }, [
     el('span', { className: 'tag', textContent: r.isTopUp ? '儲值' : (r.category || '其他') }),
   ]);
+  // 一列 = 一個品項時，主標印**品項名**，店名退到副標。
+  // 不這樣做的話，按類別看那一頁會出現五次「松本清」，等於什麼都沒說。
+  const asLine = !r.lineCount && r.name && r.name !== r.storeName;
   const dim = [
     showDate ? String(r.date || '').slice(5, 16).replace('T', ' ') : String(r.date || '').slice(11, 16),
+    asLine ? r.storeName : null,
     r.paymentMethod,
     r.storeName && r.city ? r.city : null,
   ].filter(Boolean).join(' · ');
@@ -254,7 +283,8 @@ function recRow(r, showDate = false) {
 
   const title = el('div', { className: 't' });
   if (r.needsReview && !r.reviewed) title.append(el('span', { className: 'dot', style: 'margin-right:7px' }));
-  title.append(document.createTextNode(r.storeName || r.storeNameLocal || '(未命名)'));
+  title.append(document.createTextNode(
+    asLine ? r.name : (r.storeName || r.storeNameLocal || '(未命名)')));
 
   const row = el('div', { className: `rec ${cls}` }, [
     el('span', { className: 'av', textContent: icon }),
@@ -265,14 +295,46 @@ function recRow(r, showDate = false) {
         r.isTopUp ? '不計花費' : (r.amountHome == null ? '—' : homeM(r.amountHome)) }),
     ]),
   ]);
-  row.onclick = () => openRecord(r);
+  if (r.lineCount > 1) {
+    meta.append(el('span', { className: 'dim', textContent: `${r.lineCount} 項` }));
+  }
+  row.onclick = () => (r.receiptId ? openReceipt(r.receiptId) : openRecord(r));
   return row;
 }
 
-function fillList(ul, rows, emptyText, showDate = false) {
+function fillList(ul, rows, emptyText, showDate = false, collapse = false) {
   ul.textContent = '';
-  if (!rows.length) { ul.append(el('li', { className: 'sub', style: 'padding:12px 0', textContent: emptyText })); return; }
-  for (const r of rows) ul.append(el('li', { style: 'list-style:none' }, [recRow(r, showDate)]));
+  const list = collapse ? collapseByReceipt(rows) : rows;
+  if (!list.length) { ul.append(el('li', { className: 'sub', style: 'padding:12px 0', textContent: emptyText })); return; }
+  for (const r of list) ul.append(el('li', { style: 'list-style:none' }, [recRow(r, showDate)]));
+}
+
+/**
+ * 同一張收據的品項收成一列。
+ *
+ * ⚠️ 只有**按日期**分組時才收——按類別分組時，同一張收據的品項可能落在不同組
+ * （她把那包洋芋片改成餐飲），收成一列就會讓組的小計對不上組內幾列的和。
+ * 這跟 2026-09-03 那個「拿含行前的數字排序、印不含行前的小計」是同一種錯。
+ */
+function collapseByReceipt(rows) {
+  const out = [];
+  const seen = new Map();
+  for (const r of rows) {
+    const k = r.receiptId || r.id;
+    if (!seen.has(k)) {
+      const rc = state.receipts.find((x) => x.id === k);
+      const row = { ...r, id: k, lineCount: 1, amount: r.amount || 0, amountHome: r.amountHome ?? 0 };
+      if (rc) { row.storeName = rc.storeName; row.storeNameLocal = rc.storeNameLocal; row.category = rc.category || r.category; }
+      seen.set(k, row);
+      out.push(row);
+      continue;
+    }
+    const row = seen.get(k);
+    row.lineCount += 1;
+    row.amount += r.amount || 0;
+    row.amountHome = (row.amountHome ?? 0) + (r.amountHome ?? 0);
+  }
+  return out;
 }
 
 /**
@@ -359,7 +421,8 @@ function renderGroups(rows) {
       el('span', { className: 's num', textContent: right }),
     ]));
     const ul = el('ul', { className: 'list' });
-    fillList(ul, list, '', !byDate);
+    // 按日期看：一列 = 一張收據。按類別看：一列 = 一個品項（不然改過類別的行會不見）
+    fillList(ul, list, '', !byDate, byDate);
     box.append(el('div', { className: 'card', style: 'padding:4px 15px' }, [ul]));
   }
 }
@@ -403,10 +466,10 @@ function renderRecords() {
     dialog('最近刪除', rows2.length
       ? el('ul', { className: 'list' }, rows2.map((r) => {
           const li = el('li', { className: 'item' }, [
-            el('div', { textContent: `${r.storeName || '(未命名)'}　${local(r.amount)}` }),
+            el('div', { textContent: `${r.storeName || '(未命名)'}　${local(r.total ?? r.amount)}` }),
             el('button', { className: 'btn', textContent: '復原', style: 'min-height:44px' }),
           ]);
-          li.lastChild.onclick = async () => { await db.undelete(r.id); await reload(); $('dlg').close(); render(); };
+          li.lastChild.onclick = async () => { await db.undeleteReceipt(r.id); await reload(); $('dlg').close(); render(); };
           return li;
         }))
       : el('div', { className: 'sub', textContent: '沒有已刪除的紀錄' }),
@@ -486,7 +549,7 @@ function openRecord(r) {
     ['刪除', async () => {
       // §17.2：刪除二次確認，且進「最近刪除」可復原，不是直接消失
       if (!confirm(`刪除「${r.storeName || '這筆'}」？可以到「最近刪除」復原。`)) return;
-      await db.softDelete(r.id);
+      await db.softDeleteReceipt(r.receiptId || r.id);
       await reload(); $('dlg').close(); render();
     }, 'danger'],
     ['關閉', () => $('dlg').close()],
@@ -532,7 +595,12 @@ async function intake(file) {
   renderScan();
 }
 
-/** 佇列辨識完成 → 落地成一筆紀錄。 */
+/**
+ * 佇列辨識完成 → **落地成一張「草稿收據」**（2026-09-08 起不再直接進帳）。
+ *
+ * 這裡刻意不算任何錢：拆帳與攤稅在 split.js（Node 測得到），
+ * 這一支只負責把 AI 的回傳整理成收據欄位、寫進去、叫畫面重畫。
+ */
 async function onRecognized(item) {
   const d = item.data || {};
   const date = d.date
@@ -542,11 +610,12 @@ async function onRecognized(item) {
   const city = d.city
     || (item.coords ? null : cityFromSchedule(date, state.settings.schedule));
 
-  const rec = {
+  const receipt = {
     id: item.id,
     date,
     storeName: d.storeName, storeNameLocal: d.storeNameLocal,
-    items: d.items, amount: d.total,
+    total: d.total,
+    subtotal: d.subtotal,
     currency: state.settings.localCurrency,
     payer: state.currentPayer,
     paymentMethod: d.paymentMethod,
@@ -555,23 +624,35 @@ async function onRecognized(item) {
     citySource: d.city ? 'gps' : (city ? 'schedule' : null),
     coords: item.coords,
     isTopUp: !!d.isTopUp,
-    taxType: d.taxType, taxDetail: d.taxDetail,
+    taxType: d.taxType, taxDetail: d.taxDetail, taxTotal: d.taxTotal,
     taxRefundPending: d.taxRefundPending,
     refundStatus: d.taxRefundPending > 0 ? 'pending' : 'none',
     discounts: d.discounts,
+    // 只有價格折扣要攤到品項上；點數折抵不改變合計（japan.js 的區分）
+    priceDiscount: priceDiscountTotal(d.discounts),
+    cashPaid: d.cashPaid, cashReceived: d.cashReceived, change: d.change,
+    items: d.items,
     entryMode: 'scan',
     // 程式端驗算優先於 AI 自評（§7.5：不看 AI 的 checks，自己重算）
     needsReview: (item.issues?.length || 0) > 0 || d.needsReview === true,
     reviewReason: item.issues?.join('；') || d.reviewReason || null,
     issues: item.issues,
     model: item.model, escalated: item.escalated,
+    status: db.RECEIPT_STATUS.draft,
+    recognizedAt: new Date().toISOString(),
   };
-  await db.put(db.STORES.records, rec);
+
+  const built = buildLines(receipt);
+  receipt.split = built.split;
+  receipt.splitReason = built.reason;
+
+  await db.saveReceipt(receipt, toRecords(receipt, built.lines));
   await reload();
-  if (state.tab === 'home' || state.tab === 'records') render();
+  if (state.tab !== 'confirm') render();
 }
 
 function renderScan() {
+  renderDrafts();
   const q = queue?.summary() || { total: 0, items: [] };
   $('qStat').textContent = q.total
     ? `${q.done}/${q.total} 完成　${q.pending} 排隊　${q.failed} 失敗`
@@ -622,16 +703,50 @@ function renderScan() {
   }
 }
 
+/**
+ * 待確認的收據。放在掃描頁最上面，因為那是她拍完之後會待著的那一頁。
+ * 一張一列，點進去就是確認頁。
+ */
+function renderDrafts() {
+  const box = $('draftCard');
+  box.textContent = '';
+  if (!state.drafts.length) return;
+
+  const card = el('div', { className: 'card' });
+  card.append(el('div', { className: 'row' }, [
+    el('strong', { textContent: `待確認 ${state.drafts.length} 張` }),
+    el('span', { className: 'sub', textContent: '確認前不計入統計' }),
+  ]));
+  const ul = el('ul', { className: 'list' });
+  for (const rc of [...state.drafts].sort((a, b) => String(b.date).localeCompare(String(a.date)))) {
+    const li = el('li', { className: 'item' }, [
+      el('div', {}, [
+        el('div', { textContent: rc.storeName || rc.storeNameLocal || '(未命名)' }),
+        el('div', { className: 'sub', textContent:
+          `${String(rc.date || '').slice(5, 16).replace('T', ' ')}　${local(rc.total)}` +
+          (rc.needsReview ? '　⚠ 驗算對不上' : '') }),
+      ]),
+      el('button', { className: 'btn', textContent: '確認', style: 'min-height:44px' }),
+    ]);
+    li.lastChild.onclick = () => openReceipt(rc.id, 'scan');
+    ul.append(li);
+  }
+  card.append(ul);
+  box.append(card);
+}
+
 /** 三秒快速記帳（§9）：金額 + 類別，兩下完成。沒有照片，不套 needsReview。 */
 async function quickSave() {
   const amount = Number($('quickCustom').value);
   if (!amount) { banner('warn', '先填金額'); return; }
   const cat = [...$('quickCats').children].find((c) => c.getAttribute('aria-pressed') === 'true')?.textContent || '其他';
   const now = new Date();
-  await db.put(db.STORES.records, {
+  // 手打的也是一張收據（只有一行）。全系統只有一種形狀，統計與匯出才不用分兩套。
+  const receipt = {
     id: crypto.randomUUID(),
     date: now.toISOString().slice(0, 16),
-    amount,
+    storeName: cat,
+    total: amount,
     currency: state.settings.localCurrency,
     category: cat,
     paymentMethod: '現金',
@@ -640,7 +755,9 @@ async function quickSave() {
     citySource: 'schedule',
     entryMode: 'quick',
     needsReview: false,
-  });
+    status: db.RECEIPT_STATUS.confirmed,   // 自己打的不用再確認一次
+  };
+  await db.saveReceipt(receipt, toRecords(receipt, buildLines(receipt).lines));
   $('quickCustom').value = '';
   await reload();
   banner('info', `已記一筆 ${local(amount)}（${cat}）`);
@@ -693,7 +810,8 @@ function renderManual() {
     }
     if (!rec.amount) { banner('warn', '金額沒填'); return; }
     if (!rec.date) rec.date = new Date().toISOString().slice(0, 16);
-    await db.put(db.STORES.records, rec);
+    const receipt = { ...rec, total: rec.amount, status: db.RECEIPT_STATUS.confirmed };
+    await db.saveReceipt(receipt, toRecords(receipt, buildLines(receipt).lines));
     await reload();
     for (const input of box.querySelectorAll('[data-key]')) {
       if (input.type !== 'select-one') input.value = '';
@@ -797,9 +915,12 @@ function renderStats() {
       el('span', { className: 'rk', textContent: String(i + 1) }),
       el('span', { className: 'av', style: 'width:32px;height:32px;font-size:14px', textContent: icon }),
       el('div', { className: 'mid2' }, [
-        el('div', { className: 't', textContent: t.storeName || '(未命名)' }),
+        // 拆多筆之後這裡是**品項**排行，主標印品項名，店名進副標
+        el('div', { className: 't', textContent:
+          (t.name && t.name !== t.storeName ? t.name : (t.storeName || '(未命名)')) }),
         el('div', { className: 'dim', textContent:
-          [full.category, full.paymentMethod, String(t.date).slice(5, 10)].filter(Boolean).join(' · ') }),
+          [t.name && t.name !== t.storeName ? t.storeName : null,
+           full.category, full.paymentMethod, String(t.date).slice(5, 10)].filter(Boolean).join(' · ') }),
       ]),
       el('div', { className: 'amt' }, [
         el('div', { className: 'a num', textContent: local(t.amount) }),
@@ -979,7 +1100,7 @@ function stamp() { return new Date().toISOString().slice(0, 10); }
 
 function exportExcel() {
   try {
-    const wb = buildWorkbook(state.records, state.settings);
+    const wb = buildWorkbook(state.records, state.settings, state.receipts);
     globalThis.XLSX.writeFile(wb, `旅行記帳_${stamp()}.xlsx`);
     $('exportOut').textContent = `已匯出 ${state.records.length} 筆（Excel）`;
   } catch (e) {
@@ -991,13 +1112,15 @@ function exportExcel() {
 }
 
 async function exportBackup() {
+  // 照片綁的是收據不是品項（2026-09-08），所以這裡跑的是 receipts 不是 records
   const photosByRecord = new Map();
-  for (const r of state.records) {
-    const ps = await db.photosOf(r.id);
-    if (ps.length) photosByRecord.set(r.id, await Promise.all(ps.map((p) => toBase64(p.blob))));
+  for (const rc of state.receipts) {
+    const ps = await db.photosOf(rc.id);
+    if (ps.length) photosByRecord.set(rc.id, await Promise.all(ps.map((p) => toBase64(p.blob))));
   }
   const backup = buildBackup({
-    records: state.records, walletOps: state.wallet, settings: state.settings, photosByRecord,
+    records: state.records, receipts: state.receipts,
+    walletOps: state.wallet, settings: state.settings, photosByRecord,
   });
   download(new Blob([JSON.stringify(backup)], { type: 'application/json' }),
            `旅行記帳_備份_${stamp()}.json`);
@@ -1019,10 +1142,16 @@ async function importBackup(e) {
     return;
   }
   if (!confirm(`要匯入 ${b.records.length} 筆紀錄嗎？現有資料會被合併（同 id 覆蓋）。`)) return;
-  for (const r of b.records) await db.put(db.STORES.records, r);
+
+  // v1 備份沒有 receipts（那時候一筆就是一張收據）→ 現場補出來，不要讓它變孤兒
+  const receipts = b.receipts?.length ? b.receipts : receiptsFromLegacyRecords(b.records);
+  for (const rc of receipts) await db.put(db.STORES.receipts, rc);
+  for (const r of b.records) {
+    await db.put(db.STORES.records, r.receiptId ? r : { ...r, receiptId: r.id, seq: 1, status: 'confirmed' });
+  }
   for (const w of b.walletOps) await db.put(db.STORES.wallet, w);
   await reload(); render();
-  banner('info', `已匯入 ${b.records.length} 筆`);
+  banner('info', `已匯入 ${receipts.length} 張收據、${b.records.length} 筆明細`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1055,3 +1184,266 @@ function askAmount(title, hint, onOk) {
 boot().catch((e) => {
   document.body.prepend(el('div', { className: 'banner bad', textContent: `啟動失敗：${e.message}` }));
 });
+
+// ---------------------------------------------------------------------------
+// 確認收據內容（§9 新頁，2026-09-08）
+//
+// 動線：拍 → 辨識完**先落地成 draft**（不進統計、不動錢包）→ 她在這頁確認 → confirmed。
+//
+// 為什麼草稿要寫進 IndexedDB 而不是留在記憶體裡：
+// queue.js 的佇列是一個 Map，關掉 App 就沒了。辨識完的東西只放在那裡，
+// 等於「拍完不馬上確認就會掉」——而她的用法就是白天拍、晚上回旅館一次確認。
+//
+// ⛔ 這頁唯一不准妥協的：**Σ 品項 === 合計**才給存。
+//    對不上時不自己湊，而是把兩個數字攤開來讓她決定要改哪一個。
+// ---------------------------------------------------------------------------
+
+async function openReceipt(receiptId, returnTab) {
+  const rc = state.receipts.find((r) => r.id === receiptId)
+    || await db.get(db.STORES.receipts, receiptId);
+  if (!rc) { banner('bad', '找不到這張收據'); return; }
+  const lines = await db.recordsOf(receiptId, true);
+  state.confirmDraft = {
+    receipt: { ...rc },
+    lines: lines.map((l) => ({
+      seq: l.seq, name: l.name, nameLocal: l.nameLocal, qty: l.qty,
+      unitPrice: l.unitPrice, taxRate: l.taxRate, amount: l.amount,
+      category: l.category, adjusted: l.adjusted, note: l.note,
+    })),
+  };
+  state.returnTab = returnTab || state.tab;
+  state.tab = 'confirm';
+  render();
+}
+
+function closeConfirm() {
+  state.confirmDraft = null;
+  state.tab = state.returnTab || 'records';
+  render();
+}
+
+const lineSum = (lines) => lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+
+function renderConfirm() {
+  const box = $('confirmBody');
+  box.textContent = '';
+  const d = state.confirmDraft;
+  if (!d) { closeConfirm(); return; }
+  const rc = d.receipt;
+  const isDraft = rc.status === db.RECEIPT_STATUS.draft;
+  const cur = rc.currency || state.settings.localCurrency;
+
+  const redraw = () => renderConfirm();
+
+  // ── 收據本身 ──────────────────────────────────────────────
+  const head = el('div', { className: 'card' });
+  const field = (label, value, type, onInput, opts) => {
+    const wrap = el('div', { className: 'field' }, [el('label', { textContent: label })]);
+    let input;
+    if (opts) {
+      input = el('select');
+      for (const o of opts) {
+        const [val, text] = Array.isArray(o) ? o : [o, o];
+        input.append(el('option', { value: val, textContent: text, selected: value === val }));
+      }
+      input.onchange = () => onInput(input.value);
+    } else {
+      input = el('input', { type, value: value ?? '' });
+      if (type === 'number') input.inputMode = 'numeric';
+      input.onchange = () => onInput(type === 'number' ? Number(input.value) : input.value);
+    }
+    wrap.append(input);
+    head.append(wrap);
+    return input;
+  };
+
+  field('店名', rc.storeName, 'text', (v) => { rc.storeName = v; });
+  if (rc.storeNameLocal) {
+    head.append(el('div', { className: 'sub', style: 'margin:-8px 0 12px', textContent: rc.storeNameLocal }));
+  }
+  field('日期時間', String(rc.date || '').slice(0, 16), 'datetime-local', (v) => { rc.date = v; });
+  field('合計（收據上印的那個數字）', rc.total, 'number', (v) => { rc.total = v; redraw(); });
+  field('類別', rc.category, 'text', (v) => {
+    // 整張改類別時，沒有被個別改過的那幾行跟著走（2026-09-08 她的決定）
+    const before = rc.category;
+    for (const l of d.lines) if (!l.category || l.category === before) l.category = v;
+    rc.category = v; redraw();
+  }, CATEGORIES);
+  field('支付方式', rc.paymentMethod, 'text', (v) => { rc.paymentMethod = v; }, PAYMENT_METHODS);
+  field('付款人', rc.payer, 'text', (v) => { rc.payer = v; }, payerOptions());
+  field('城市', rc.city, 'text', (v) => { rc.city = v; rc.citySource = 'manual'; });
+  box.append(head);
+
+  // ── 辨識時就已經知道的問題 ───────────────────────────────
+  if (rc.needsReview && rc.reviewReason) {
+    box.append(el('div', { className: 'banner warn', textContent: `要看一下：${rc.reviewReason}` }));
+  }
+  if (rc.split === false && rc.splitReason) {
+    box.append(el('div', { className: 'banner info', textContent:
+      `這張沒有拆開，整張算一筆 —— ${rc.splitReason}。要拆的話在下面自己加行。` }));
+  }
+
+  // ── 品項 ────────────────────────────────────────────────
+  const items = el('div', { className: 'card' });
+  const hd = el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px' }, [
+    el('strong', { textContent: '購買明細' }),
+  ]);
+  const addBtn = el('button', { className: 'btn', textContent: '＋ 新增', style: 'padding:0 14px' });
+  addBtn.onclick = () => {
+    d.lines.push({
+      seq: (d.lines.at(-1)?.seq || 0) + 1, name: '', nameLocal: '', qty: 1,
+      unitPrice: 0, taxRate: null, amount: 0, category: rc.category,
+    });
+    redraw();
+  };
+  hd.append(addBtn);
+  items.append(hd);
+
+  for (const l of d.lines) {
+    const row = el('div', { className: 'ln' });
+    row.append(el('span', { className: 'no', textContent: String(l.seq) }));
+
+    const nm = el('div', { className: 'nm' });
+    const nameIn = el('input', { value: l.name || '', placeholder: '品項名稱' });
+    nameIn.onchange = () => { l.name = nameIn.value; };
+    nm.append(nameIn);
+
+    const sub = el('div', { className: 'lsub' });
+    const bits = [
+      l.nameLocal || null,
+      l.qty > 1 ? `${l.qty} × ${symbolOf(cur)}${nf(l.unitPrice)}` : null,
+      l.taxRate ? `${Math.round(l.taxRate * 100)}%` : null,
+      l.adjusted ? '含湊整差' : null,
+    ].filter(Boolean);
+    sub.append(document.createTextNode(bits.join(' · ')));
+    nm.append(sub);
+
+    const catSel = el('select');   // 樣式在 index.html 的 .ln .nm select
+    for (const c of CATEGORIES) {
+      catSel.append(el('option', { value: c, textContent: c, selected: (l.category || rc.category) === c }));
+    }
+    catSel.onchange = () => { l.category = catSel.value; };
+    nm.append(catSel);
+    row.append(nm);
+
+    const pr = el('div', { className: 'pr' });
+    const amtIn = el('input', { type: 'number', inputMode: 'numeric', value: l.amount ?? 0 });
+    amtIn.onchange = () => { l.amount = Number(amtIn.value); l.adjusted = false; redraw(); };
+    pr.append(amtIn);
+    row.append(pr);
+
+    const rm = el('button', { className: 'rm', textContent: '✕', title: '刪掉這一行' });
+    rm.onclick = () => {
+      d.lines = d.lines.filter((x) => x !== l);
+      d.lines.forEach((x, i) => { x.seq = i + 1; });
+      redraw();
+    };
+    row.append(rm);
+    items.append(row);
+  }
+
+  // ── 加總對不對 ───────────────────────────────────────────
+  const sum = lineSum(d.lines);
+  const balanced = isBalanced(d.lines, rc.total, cur);
+  const totals = el('div', { style: 'margin-top:12px' });
+  if (rc.subtotal != null) {
+    totals.append(el('div', { className: 'sumline' }, [
+      el('span', { textContent: '小計' }), el('span', { className: 'num', textContent: local(rc.subtotal) })]));
+  }
+  const taxSum = (rc.taxDetail?.tax8 || 0) + (rc.taxDetail?.tax10 || 0);
+  const taxTotal = rc.taxTotal ?? (taxSum || null);
+  if (taxTotal) {
+    totals.append(el('div', { className: 'sumline' }, [
+      el('span', { textContent: '消費稅' }), el('span', { className: 'num', textContent: local(taxTotal) })]));
+  }
+  totals.append(el('div', { className: 'sumline' }, [
+    el('span', { textContent: `品項加總（${d.lines.length} 筆）` }),
+    el('span', { className: 'num', textContent: local(sum) })]));
+  totals.append(el('div', { className: 'sumline tot' }, [
+    el('span', { textContent: '合計' }), el('span', { className: 'num', textContent: local(rc.total) })]));
+  const home = rc.total == null ? null : toHomeAmount(rc);
+  if (home != null) {
+    totals.append(el('div', { className: 'sumline', style: 'justify-content:flex-end' }, [
+      el('span', { className: 'num', textContent: `≈ ${homeM(home)}` })]));
+  }
+  items.append(totals);
+  box.append(items);
+
+  if (balanced) {
+    box.append(el('div', { className: 'banner info', textContent: '✓ 品項加總 = 合計，可以存了。' }));
+  } else {
+    // 「差 ¥-880」很難讀，直接講多還是少
+    const diff = sum - (Number(rc.total) || 0);
+    const b = el('div', { className: 'banner bad' }, [
+      el('div', { textContent:
+        `品項加總 ${local(sum)} 比合計 ${local(rc.total)} ${diff > 0 ? '多' : '少'} ` +
+        `${local(Math.abs(diff))} —— 兩個要一樣才能存。` }),
+    ]);
+    const useSum = el('button', { className: 'btn', style: 'margin-top:9px',
+      textContent: `把合計改成 ${local(sum)}` });
+    useSum.onclick = () => { rc.total = sum; redraw(); };
+    b.append(useSum);
+    box.append(b);
+  }
+
+  // ── 照片 ────────────────────────────────────────────────
+  const shots = el('div');
+  box.append(shots);
+  db.photosOf(rc.id).then((photos) => {
+    for (const p of photos) shots.append(el('img', { className: 'shot', src: URL.createObjectURL(p.blob) }));
+  }).catch(() => {});
+
+  // ── 按鈕 ────────────────────────────────────────────────
+  const cta = el('div', { style: 'margin-top:14px;display:flex;flex-direction:column;gap:10px' });
+  const save = el('button', { className: 'btn primary wide',
+    textContent: isDraft
+      ? `確認儲存（${d.lines.length} 筆明細 · ${local(rc.total)}）`
+      : `儲存變更（${d.lines.length} 筆明細）` });
+  save.disabled = !balanced;
+  if (!balanced) save.style.opacity = '.5';
+  save.onclick = () => saveConfirm();
+  cta.append(save);
+
+  const back = el('button', { className: 'btn wide', textContent: isDraft ? '稍後再確認' : '返回' });
+  back.onclick = closeConfirm;
+  cta.append(back);
+
+  const del = el('button', { className: 'btn wide danger', textContent: '刪除這張收據' });
+  del.onclick = async () => {
+    if (!confirm(`刪除「${rc.storeName || '這張'}」？連同 ${d.lines.length} 筆明細一起，可以到「最近刪除」復原。`)) return;
+    await db.softDeleteReceipt(rc.id);
+    await reload();
+    closeConfirm();
+  };
+  cta.append(del);
+  box.append(cta);
+}
+
+/** 存回去。走 db.saveReceipt（一個 transaction），不會留半套資料。 */
+async function saveConfirm() {
+  const d = state.confirmDraft;
+  if (!d) return;
+  const rc = d.receipt;
+  if (!isBalanced(d.lines, rc.total, rc.currency || state.settings.localCurrency)) {
+    banner('bad', '品項加總跟合計對不上，先處理那個再存。');
+    return;
+  }
+  const receipt = {
+    ...rc,
+    status: db.RECEIPT_STATUS.confirmed,
+    confirmedAt: new Date().toISOString(),
+    reviewed: true,
+  };
+  await db.saveReceipt(receipt, toRecords(receipt, d.lines));
+  await reload();
+  closeConfirm();
+  banner('info', `已存 ${receipt.storeName || '這張收據'}　${local(receipt.total)}（${d.lines.length} 筆明細）`);
+}
+
+/** 確認頁右下角那個「≈ S$xx」。算式在 model.js，這裡只是借過來用。 */
+function toHomeAmount(rc) {
+  const s = state.settings;
+  if ((rc.currency || s.localCurrency) === s.homeCurrency) return rc.total;
+  const rate = rc.paymentMethod === '信用卡' ? s.cardRate : s.cashRate;
+  return rate ? rc.total / rate : null;
+}

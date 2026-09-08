@@ -15,12 +15,22 @@ import {
 } from './stats.js';
 import { pendingRefund } from './wallet.js';
 
-/** 明細頁的欄位。順序就是 Excel 上的順序。 */
+/**
+ * 明細頁的欄位。順序就是 Excel 上的順序。
+ * 2026-09-08 起**一列 = 一個品項**；同一張收據的幾列共用 receiptId，
+ * 要跟手上的紙本收據對，看「收據」那一頁。
+ */
 export const DETAIL_COLUMNS = [
   ['date', '日期時間'],
   ['day', '第幾天'],
+  ['receiptId', '收據ID'],
+  ['seq', '第幾項'],
   ['storeName', '店名'],
   ['storeNameLocal', '店名（原文）'],
+  ['name', '品項'],
+  ['nameLocal', '品項（原文）'],
+  ['qty', '數量'],
+  ['unitPrice', '單價'],
   ['category', '類別'],
   ['amount', '金額（當地）'],
   ['currency', '幣別'],
@@ -48,6 +58,57 @@ export function detailRows(records, settings) {
   return records.map((r) => {
     const row = { ...r, payerName: payerName(r, settings) };
     return DETAIL_COLUMNS.map(([key]) => {
+      const v = row[key];
+      if (typeof v === 'boolean') return v ? '是' : '';
+      return v ?? '';
+    });
+  });
+}
+
+/** 收據頁的欄位：**一張收據一列**，跟手上的紙本一張一張對得起來。 */
+export const RECEIPT_COLUMNS = [
+  ['date', '日期時間'],
+  ['id', '收據ID'],
+  ['storeName', '店名'],
+  ['storeNameLocal', '店名（原文）'],
+  ['category', '類別'],
+  ['subtotal', '小計'],
+  ['taxTotal', '稅'],
+  ['total', '合計'],
+  ['lineCount', '品項數'],
+  ['lineSum', '品項加總'],
+  ['balanced', '加總對得上'],
+  ['currency', '幣別'],
+  ['paymentMethod', '支付方式'],
+  ['payerName', '付款人'],
+  ['city', '城市'],
+  ['taxType', '稅制'],
+  ['taxRefundPending', '待退稅額'],
+  ['status', '狀態'],
+  ['entryMode', '輸入方式'],
+  ['needsReview', '待確認'],
+  ['reviewReason', '待確認原因'],
+];
+
+/**
+ * 收據頁。
+ *
+ * 「品項加總」與「加總對得上」是**故意印出來的**：拆帳的鐵律是 Σ 品項 === 合計，
+ * 那就讓它在 Excel 裡也看得到 —— 一眼掃下去只要有一格是「否」就知道哪張要回去看。
+ */
+export function receiptRows(receipts, records, settings) {
+  return (receipts || []).map((rc) => {
+    const lines = (records || []).filter((r) => r.receiptId === rc.id);
+    const lineSum = lines.reduce((a, r) => a + (r.amount || 0), 0);
+    const row = {
+      ...rc,
+      payerName: payerName(rc, settings),
+      lineCount: lines.length,
+      lineSum,
+      balanced: lines.length ? (Math.abs(lineSum - (rc.total || 0)) < 0.005 ? '是' : '否') : '',
+      status: rc.status === 'draft' ? '未確認' : '已確認',
+    };
+    return RECEIPT_COLUMNS.map(([key]) => {
       const v = row[key];
       if (typeof v === 'boolean') return v ? '是' : '';
       return v ?? '';
@@ -110,13 +171,17 @@ function round2(n) {
  * 「按了匯出但什麼都沒發生」是最糟的失敗方式，尤其這是備份。
  * UI 那層接住之後改走 CSV。
  */
-export function buildWorkbook(records, settings) {
+export function buildWorkbook(records, settings, receipts) {
   const XLSX = globalThis.XLSX;
   if (!XLSX) throw new Error('SheetJS 沒載入（可能沒網路），改用 CSV 匯出');
 
   const wb = XLSX.utils.book_new();
   const detail = [DETAIL_COLUMNS.map(([, label]) => label), ...detailRows(records, settings)];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(detail), '明細');
+  if (receipts?.length) {
+    const rc = [RECEIPT_COLUMNS.map(([, label]) => label), ...receiptRows(receipts, records, settings)];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rc), '收據');
+  }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows(records, settings)), '統計');
   return wb;
 }
@@ -137,21 +202,44 @@ export function toCSV(records, settings) {
  * 完整備份（含照片）。這才是能還原的那一份。
  * @param photosByRecord Map<recordId, string[]>  已轉成 base64 的照片
  */
-export function buildBackup({ records, walletOps, settings, photosByRecord }) {
+export function buildBackup({ records, walletOps, settings, photosByRecord, receipts }) {
   return {
     format: 'travel-receipt-app-backup',
-    version: 1,
+    version: 2,                                    // v2 起多了 receipts，照片改綁 receiptId
     exportedAt: new Date().toISOString(),
     counts: {
       records: records.length,
+      receipts: (receipts || []).length,
       photos: [...(photosByRecord?.values() || [])].reduce((s, a) => s + a.length, 0),
       walletOps: walletOps.length,
     },
     settings: { ...settings, apiKey: undefined },   // key 不進備份檔
+    receipts: receipts || [],
     records,
     walletOps,
     photos: photosByRecord ? Object.fromEntries(photosByRecord) : {},
   };
+}
+
+/**
+ * v1 備份（拆多筆之前的）沒有 receipts —— 那時候一筆紀錄就是一張收據，
+ * 所以照樣長得出來。**不要拒收舊備份**，她 9 月測的資料就是 v1。
+ */
+export function receiptsFromLegacyRecords(records) {
+  return (records || []).map((r) => ({
+    id: r.id,
+    date: r.date,
+    storeName: r.storeName, storeNameLocal: r.storeNameLocal,
+    total: r.amount, currency: r.currency,
+    payer: r.payer, paymentMethod: r.paymentMethod, category: r.category,
+    city: r.city, citySource: r.citySource, coords: r.coords,
+    taxType: r.taxType, taxDetail: r.taxDetail,
+    taxRefundPending: r.taxRefundPending, refundStatus: r.refundStatus,
+    discounts: r.discounts, isTopUp: r.isTopUp, entryMode: r.entryMode,
+    needsReview: r.needsReview, reviewReason: r.reviewReason, note: r.note,
+    status: 'confirmed',
+    migratedFrom: 'backup-v1',
+  }));
 }
 
 /**

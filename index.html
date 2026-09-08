@@ -202,6 +202,28 @@ img.shot{width:100%;border-radius:13px;border:1px solid var(--line);margin-top:1
 table{width:100%;border-collapse:collapse;font-size:14.5px}
 td,th{padding:8px 4px;text-align:left;border-bottom:1px solid var(--line)}
 td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+
+/* 確認收據內容（§9 新頁，2026-09-08 拆多筆） -------------------------- */
+.ln{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.ln:last-of-type{border-bottom:0}
+.ln .no{width:22px;flex:none;font-size:13px;color:var(--muted);text-align:right}
+.ln .nm{flex:1;min-width:0}
+.ln .nm input{width:100%;border:0;background:transparent;color:var(--ink);
+  font-size:15px;font-weight:600;padding:2px 0;min-height:28px}
+.ln .nm .lsub{font-size:13px;color:var(--muted);margin-top:2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ln .nm select{margin-top:5px;min-height:34px;font-size:13px;padding:0 8px;
+  border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--muted)}
+.ln .pr{width:98px;flex:none}
+.ln .pr input{width:100%;text-align:right;border:1px solid var(--line);border-radius:11px;
+  background:var(--card);color:var(--ink);font-size:15px;min-height:40px;padding:0 9px;
+  font-variant-numeric:tabular-nums}
+.ln .rm{flex:none;min-height:40px;padding:0 11px;border-radius:11px;border:1px solid var(--line);
+  background:var(--card);color:var(--muted);font-size:16px}
+.sumline{display:flex;justify-content:space-between;font-size:14.5px;padding:5px 0;color:var(--muted)}
+.sumline.tot{font-size:17px;font-weight:700;color:var(--ink);
+  border-top:1px solid var(--line);margin-top:7px;padding-top:10px}
+.sumline .num{font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
@@ -292,6 +314,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 
   <!-- 掃描 ------------------------------------------------------------ -->
   <section id="tab-scan" hidden>
+    <div id="draftCard"></div>
     <div class="card">
       <div class="row"><strong>辨識佇列</strong><span class="sub" id="qStat">閒置</span></div>
       <ul class="list" id="qList"></ul>
@@ -314,6 +337,11 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
     <input type="file" id="shot" accept="image/*" capture="environment" multiple hidden>
     <button class="btn primary wide" id="btnShoot" style="min-height:64px;font-size:18px">📷 拍收據（可連拍）</button>
     <div class="sub" style="text-align:center;margin-top:8px">拍完立刻回到相機，辨識在背景跑</div>
+  </section>
+
+    <!-- 確認收據內容（拍完先落地成草稿，她按確認才進統計） ------------------ -->
+  <section id="tab-confirm" hidden>
+    <div id="confirmBody"></div>
   </section>
 
   <!-- 手動輸入 -------------------------------------------------------- -->
