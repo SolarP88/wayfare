@@ -492,6 +492,16 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
     <div class="card"><strong>出發前檢查清單</strong><ul class="list" id="preflight"></ul></div>
     <div class="card"><strong>一鍵健檢</strong><div id="healthOut"></div>
       <button class="btn wide" id="btnHealth" style="margin-top:10px">跑一次</button></div>
+    <div class="card"><strong>重新開始</strong>
+      <div class="sub" style="margin:6px 0 12px">
+        <b>刪掉就沒了，不進「最近刪除」。</b>動手前先按上面的「備份（含照片）」。
+      </div>
+      <button class="btn wide danger" id="btnClearRecords" style="margin-bottom:10px">
+        清空所有紀錄（設定保留）</button>
+      <button class="btn wide danger" id="btnWipeAll">全部清掉，回到初次安裝</button>
+      <div class="sub" style="margin-top:8px" id="resetOut"></div>
+    </div>
+
     <div class="card"><strong>匯出與備份</strong>
       <div class="stack" style="margin-top:10px">
         <button class="btn primary wide" id="btnXlsx">匯出 Excel</button>

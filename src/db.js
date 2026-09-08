@@ -314,6 +314,47 @@ export async function clearAvatar(payerId) {
 }
 
 // ---------------------------------------------------------------------------
+// 重新開始（§17.2 的例外：這兩支是**真的刪掉**，不進回收桶）
+//
+// 所以呼叫端一定要先問過、而且問兩次。這裡只負責刪，不負責攔。
+// ---------------------------------------------------------------------------
+
+/**
+ * 清掉所有帳，**保留設定**（匯率、行程、付款人、頭像、封面、API key）。
+ * 出發前把測試資料掃乾淨用的。
+ */
+export async function clearAllRecords() {
+  const db = await openDB();
+  const stores = [STORES.receipts, STORES.records, STORES.photos, STORES.wallet];
+  const t = db.transaction(stores, 'readwrite');
+  for (const name of stores) t.objectStore(name).clear();
+  return new Promise((resolve, reject) => {
+    t.oncomplete = () => resolve(true);
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error);
+  });
+}
+
+/**
+ * 整個資料庫刪掉，回到初次安裝。
+ *
+ * ⚠️ 一定要先關掉連線，否則刪除會卡在 blocked 一直不完成。
+ *    刪完呼叫端應該直接重新載入頁面——記憶體裡的狀態已經沒有意義了。
+ */
+export async function wipeEverything() {
+  const db = await openDB();
+  db.close();
+  dbPromise = null;
+  return new Promise((resolve) => {
+    const req = indexedDB.deleteDatabase(DB_NAME);
+    req.onsuccess = () => resolve(true);
+    req.onerror = () => resolve(false);
+    req.onblocked = () => resolve(false);
+    setTimeout(() => resolve(false), 4000);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // 照片
 // ---------------------------------------------------------------------------
 

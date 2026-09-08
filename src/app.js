@@ -1427,6 +1427,47 @@ function wireSettings() {
     renderCover();
   };
 
+  // 重新開始。**問兩次**——第一次講清楚會刪什麼，第二次擋手滑（§17.2 戴手套誤觸）
+  $('btnClearRecords').onclick = async () => {
+    const n = state.receipts.length;
+    if (!confirm(`要清空 ${n} 張收據、所有品項、照片與錢包紀錄嗎？\n\n`
+      + '設定會留著（匯率、行程、付款人、頭像、封面、API key）。\n'
+      + '這個動作不進「最近刪除」，救不回來。')) return;
+    if (!confirm('最後確認：真的清空所有紀錄？')) return;
+
+    await db.clearAllRecords();
+    // 錢包歸零之後，依設定裡的初始金額把「出發時的錢」重新放回去，
+    // 不然餘額會變 0，但設定頁還寫著初始現金 250,000，兩邊打架
+    for (const p of state.settings.payers || []) {
+      if (!p.name) continue;
+      if (p.initialCash > 0) {
+        await db.put(db.STORES.wallet, { type: 'init', pot: 'cash', payerId: p.id,
+          amount: p.initialCash, at: new Date().toISOString() });
+      }
+      if (p.initialWise > 0) {
+        await db.put(db.STORES.wallet, { type: 'init', pot: 'wise', payerId: p.id,
+          amount: p.initialWise, at: new Date().toISOString() });
+      }
+    }
+    await reload();
+    render();
+    banner('info', `已清空 ${n} 張收據，設定與初始現金都還在。`);
+  };
+
+  $('btnWipeAll').onclick = async () => {
+    if (!confirm('要把「所有東西」都清掉嗎？\n\n'
+      + '包含紀錄、照片、匯率、行程、付款人、頭像、封面、API key——\n'
+      + '等於這個 App 從沒用過。')) return;
+    if (!confirm('最後確認：全部清掉，回到初次安裝？')) return;
+
+    const ok = await db.wipeEverything();
+    if (!ok) {
+      $('resetOut').textContent = '清不掉——可能還有另一個分頁開著這個 App。把其他分頁關掉再試一次。';
+      return;
+    }
+    location.reload();
+  };
+
   $('btnXlsx').onclick = exportExcel;
   $('btnBackup').onclick = exportBackup;
   $('btnRestore').onclick = () => $('restoreFile').click();
