@@ -92,7 +92,13 @@ async function boot() {
     banner('bad', `讀不到設定：${e.message}`);
   }
   configureRateLimit({ rpm: state.settings.rpm ?? 15 });
-  state.currentPayer = state.settings.payers?.[0]?.id || 'p1';
+  // 記住上次選的付款人。原本每次開 App 都重設回第一位——
+  // 同伴付的那幾筆會默默記到她頭上（2026-09-08 她問「怎麼知道是誰付的」）。
+  const savedPayer = (() => {
+    try { return localStorage.getItem('wayfare-payer'); } catch { return null; }
+  })();
+  const ids = (state.settings.payers || []).filter((p) => p.name).map((p) => p.id);
+  state.currentPayer = ids.includes(savedPayer) ? savedPayer : (ids[0] || 'p1');
 
   await reload();
 
@@ -232,8 +238,6 @@ function renderWarnings() {
 // 首頁
 // ---------------------------------------------------------------------------
 function wireHome() {
-  const sel = $('cashPayer');
-  sel.onchange = () => { state.currentPayer = sel.value; renderHome(); };
   $('btnTopup').onclick = () => askAmount('補充現金', '在 ATM 領了多少？', async (amount) => {
     await db.put(db.STORES.wallet, {
       type: 'topup', payerId: state.currentPayer, amount, at: new Date().toISOString(),
@@ -273,11 +277,18 @@ function wireHome() {
 
 function renderHome() {
   const s = state.settings;
-  const sel = $('cashPayer');
-  sel.textContent = '';
-  for (const p of s.payers || []) {
-    if (!p.name) continue;
-    sel.append(el('option', { value: p.id, textContent: p.name, selected: p.id === state.currentPayer }));
+  // 兩位並排，各自的餘額直接寫在 chip 上——不用切換就看得到對方剩多少
+  const tabs = $('payerTabs');
+  tabs.textContent = '';
+  tabs.hidden = !multiPayer();
+  if (multiPayer()) {
+    for (const [id, name] of payerOptions()) {
+      const b = el('button', { className: 'chip', textContent:
+        `${name}　${local(cashBalance(id, state.records, state.wallet, s))}` });
+      b.setAttribute('aria-pressed', String(id === state.currentPayer));
+      b.onclick = () => setPayer(id);
+      tabs.append(b);
+    }
   }
 
   const bal = cashBalance(state.currentPayer, state.records, state.wallet, s);
@@ -374,6 +385,8 @@ function recRow(r, showDate = false) {
     showDate ? String(r.date || '').slice(5, 16).replace('T', ' ') : String(r.date || '').slice(11, 16),
     asLine ? r.storeName : null,
     r.paymentMethod,
+    // 有第二位付款人時才印——一個人用的話這欄只是噪音
+    multiPayer() ? payerName(r.payer) : null,
     r.storeName && r.city ? r.city : null,
   ].filter(Boolean).join(' · ');
   if (dim) meta.append(el('span', { className: 'dim', textContent: dim }));
@@ -454,6 +467,19 @@ const catMeta = (c) => CAT_META[c] || CAT_META['其他'];
  */
 const payerOptions = () =>
   (state.settings.payers || []).filter((p) => p.name).map((p) => [p.id, p.name]);
+
+/** 付款人的名字（`p1` 是內部代號，不給人看）。 */
+const payerName = (id) =>
+  (state.settings.payers || []).find((p) => p.id === id)?.name || id || '';
+
+/** 有沒有第二個人。只有一個人時，所有跟付款人有關的東西都不顯示。 */
+const multiPayer = () => payerOptions().length > 1;
+
+function setPayer(id) {
+  state.currentPayer = id;
+  try { localStorage.setItem('wayfare-payer', id); } catch { /* 私密視窗 */ }
+  render();
+}
 
 const escape = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -762,6 +788,19 @@ async function onRecognized(item) {
 
 function renderScan() {
   renderDrafts();
+
+  // 拍照與快速記帳都會算在這個人頭上，所以放在拍照按鈕旁邊看得到
+  $('scanPayerBox').hidden = !multiPayer();
+  if (multiPayer()) {
+    const box = $('scanPayer');
+    box.textContent = '';
+    for (const [id, name] of payerOptions()) {
+      const b = el('button', { className: 'chip', textContent: name });
+      b.setAttribute('aria-pressed', String(id === state.currentPayer));
+      b.onclick = () => setPayer(id);
+      box.append(b);
+    }
+  }
   const q = queue?.summary() || { total: 0, items: [], completed: 0 };
   // 辨識完的會自己離開佇列，所以這裡只講「還在跑的」，外加一個累計數字
   const bits = [];

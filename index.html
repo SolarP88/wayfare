@@ -288,10 +288,10 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
     </div>
 
     <div class="card">
-      <div class="row">
-        <div class="muted">現金錢包</div>
-        <select id="cashPayer" style="min-height:46px;border-radius:13px;border:1px solid var(--line);background:var(--sunk);padding:0 10px"></select>
-      </div>
+      <div class="row"><div class="muted">現金錢包</div></div>
+      <!-- 兩位付款人並排，餘額直接寫在上面：不用切換就看得到對方剩多少。
+           只有一位（第二位沒填名字）時整排不顯示。 -->
+      <div class="chips" id="payerTabs" style="margin:8px 0 4px"></div>
       <div class="big num" id="cash" style="margin-top:6px">—</div>
       <div class="sub" id="cashHint"></div>
       <div class="row" style="margin-top:12px;gap:10px">
@@ -373,6 +373,12 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       <div class="sub" style="margin:12px 0 6px">怎麼付的</div>
       <div class="chips" id="quickPay"></div>
       <button class="btn primary wide" id="btnQuickSave" style="margin-top:12px">記一筆</button>
+    </div>
+
+    <!-- 拍照與快速記帳都會算在「當下選的付款人」頭上，所以要看得到、改得到 -->
+    <div id="scanPayerBox" hidden>
+      <div class="sub" style="margin:14px 0 6px">接下來記的算誰付的</div>
+      <div class="chips" id="scanPayer"></div>
     </div>
 
     <!-- 拍照按鈕放最下面：單手操作，拇指區（§14） -->
