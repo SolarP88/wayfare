@@ -15,7 +15,7 @@ import {
   todayTotal, tripTotal, preTripTotal, byCategory, byPayment, byCity, byPayer,
   dailySeries, budgetProgress, topSpends, healthCheck, onTripSpending,
 } from './stats.js';
-import { buildLines, toRecords, isBalanced } from './split.js';
+import { buildLines, toRecords, isBalanced, decimalsOf } from './split.js';
 import { priceDiscountTotal } from './country-rules/japan.js';
 import * as db from './db.js';
 import { createQueue, STATUS } from './queue.js';
@@ -57,6 +57,18 @@ const nf = (n, dp = 0) =>
   n == null || Number.isNaN(n) ? '—' : n.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
 
 const local = (n) => `${symbolOf(state.settings.localCurrency)}${nf(n)}`;
+
+/**
+ * 照**那一筆自己的幣別**印。
+ *
+ * ⚠️ 2026-09-08 修：列表原本一律用 local()，等於不管那筆是什麼幣別都印 ¥。
+ * 她手動記了一筆 S$1,000 的東西，列表印成「¥1,000」，看起來就像記成日圓、
+ * 還以為現金錢包被扣了（實際上沒有）。**幣別印錯比金額印錯更難發現。**
+ */
+const amt = (n, currency) => {
+  const cur = currency || state.settings.localCurrency;
+  return `${symbolOf(cur)}${nf(n, decimalsOf(cur))}`;
+};
 const homeM = (n) => (n == null ? '—' : `${symbolOf(state.settings.homeCurrency)}${nf(n, 2)}`);
 
 /** 今天（用當地時區判斷，§16 第 10 條：晚上 11:30 吃拉麵不可以歸錯天）。 */
@@ -329,8 +341,10 @@ function renderHome() {
     .filter((r) => localDay(r.date) === todayLocal())
     .sort((a, b) => String(b.date).localeCompare(String(a.date)));
   $('todayCount').textContent = `${today.length} 筆`;
-  const todaySum = today.reduce((acc, r) => acc + (r.amount || 0), 0);
-  $('todaySub').textContent = today.length ? `${local(todaySum)} · ${today.length} 筆` : '';
+  // ⚠️ 不可以把不同幣別的原幣金額加在一起（S$200 + ¥550 是沒有意義的數字）。
+  //    要加總就加**換算後的本位幣**，那是唯一共通的單位。
+  const todaySum = today.reduce((acc, r) => acc + (r.amountHome ?? 0), 0);
+  $('todaySub').textContent = today.length ? `${homeM(todaySum)} · ${today.length} 筆` : '';
   fillList($('todayList'), today, '今天還沒有紀錄');
 }
 
@@ -366,7 +380,7 @@ function recRow(r, showDate = false) {
     el('span', { className: 'av', textContent: icon }),
     el('div', { className: 'mid2' }, [title, meta]),
     el('div', { className: 'amt' }, [
-      el('div', { className: 'a num', textContent: r.isTopUp ? `${local(r.amount)}` : local(r.amount) }),
+      el('div', { className: 'a num', textContent: amt(r.amount, r.currency) }),
       el('div', { className: 'b num', textContent:
         r.isTopUp ? '不計花費' : (r.amountHome == null ? '—' : homeM(r.amountHome)) }),
     ]),
@@ -549,7 +563,7 @@ function renderRecords() {
     dialog('最近刪除', rows2.length
       ? el('ul', { className: 'list' }, rows2.map((r) => {
           const li = el('li', { className: 'item' }, [
-            el('div', { textContent: `${r.storeName || '(未命名)'}　${local(r.total ?? r.amount)}` }),
+            el('div', { textContent: `${r.storeName || '(未命名)'}　${amt(r.total ?? r.amount, r.currency)}` }),
             el('button', { className: 'btn', textContent: '復原', style: 'min-height:44px' }),
           ]);
           li.lastChild.onclick = async () => { await db.undeleteReceipt(r.id); await reload(); $('dlg').close(); render(); };
@@ -831,7 +845,7 @@ function renderDrafts() {
       el('div', {}, [
         el('div', { textContent: rc.storeName || rc.storeNameLocal || '(未命名)' }),
         el('div', { className: 'sub', textContent:
-          `${String(rc.date || '').slice(5, 16).replace('T', ' ')}　${local(rc.total)}` +
+          `${String(rc.date || '').slice(5, 16).replace('T', ' ')}　${amt(rc.total, rc.currency)}` +
           (rc.needsReview ? '　⚠ 驗算對不上' : '') }),
       ]),
       el('button', { className: 'btn', textContent: '確認', style: 'min-height:44px' }),
@@ -943,7 +957,12 @@ function renderManual() {
     for (const input of box.querySelectorAll('[data-key]')) {
       if (input.type !== 'select-one') input.value = '';
     }
-    banner('info', `已儲存 ${rec.storeName || ''} ${nf(rec.amount)}`);
+    // ⚠️ 幣別**一定要歸位**。她記完一筆 SGD 的機票，下一筆 Donki 就沿用了 SGD，
+    // 變成 S$1,000（2026-09-08）。其他選單沿用沒關係，幣別不行——差 125 倍。
+    const curSel = box.querySelector('[data-key="currency"]');
+    if (curSel) curSel.value = state.settings.localCurrency;
+
+    banner('info', `已儲存 ${rec.storeName || ''} ${amt(rec.amount, rec.currency)}`);
   };
 }
 
@@ -1050,7 +1069,7 @@ function renderStats() {
            full.category, full.paymentMethod, String(t.date).slice(5, 10)].filter(Boolean).join(' · ') }),
       ]),
       el('div', { className: 'amt' }, [
-        el('div', { className: 'a num', textContent: local(t.amount) }),
+        el('div', { className: 'a num', textContent: amt(t.amount, full.currency) }),
         el('div', { className: 'b num', textContent: homeM(t.amountHome) }),
       ]),
     ]));
@@ -1622,19 +1641,19 @@ function renderConfirm() {
   const totals = el('div', { style: 'margin-top:12px' });
   if (rc.subtotal != null) {
     totals.append(el('div', { className: 'sumline' }, [
-      el('span', { textContent: '小計' }), el('span', { className: 'num', textContent: local(rc.subtotal) })]));
+      el('span', { textContent: '小計' }), el('span', { className: 'num', textContent: amt(rc.subtotal, cur) })]));
   }
   const taxSum = (rc.taxDetail?.tax8 || 0) + (rc.taxDetail?.tax10 || 0);
   const taxTotal = rc.taxTotal ?? (taxSum || null);
   if (taxTotal) {
     totals.append(el('div', { className: 'sumline' }, [
-      el('span', { textContent: '消費稅' }), el('span', { className: 'num', textContent: local(taxTotal) })]));
+      el('span', { textContent: '消費稅' }), el('span', { className: 'num', textContent: amt(taxTotal, cur) })]));
   }
   totals.append(el('div', { className: 'sumline' }, [
     el('span', { textContent: `品項加總（${d.lines.length} 筆）` }),
-    el('span', { className: 'num', textContent: local(sum) })]));
+    el('span', { className: 'num', textContent: amt(sum, cur) })]));
   totals.append(el('div', { className: 'sumline tot' }, [
-    el('span', { textContent: '合計' }), el('span', { className: 'num', textContent: local(rc.total) })]));
+    el('span', { textContent: '合計' }), el('span', { className: 'num', textContent: amt(rc.total, cur) })]));
   const home = rc.total == null ? null : toHomeAmount(rc);
   if (home != null) {
     totals.append(el('div', { className: 'sumline', style: 'justify-content:flex-end' }, [
@@ -1650,11 +1669,11 @@ function renderConfirm() {
     const diff = sum - (Number(rc.total) || 0);
     const b = el('div', { className: 'banner bad' }, [
       el('div', { textContent:
-        `品項加總 ${local(sum)} 比合計 ${local(rc.total)} ${diff > 0 ? '多' : '少'} ` +
-        `${local(Math.abs(diff))} —— 兩個要一樣才能存。` }),
+        `品項加總 ${amt(sum, cur)} 比合計 ${amt(rc.total, cur)} ${diff > 0 ? '多' : '少'} ` +
+        `${amt(Math.abs(diff), cur)} —— 兩個要一樣才能存。` }),
     ]);
     const useSum = el('button', { className: 'btn', style: 'margin-top:9px',
-      textContent: `把合計改成 ${local(sum)}` });
+      textContent: `把合計改成 ${amt(sum, cur)}` });
     useSum.onclick = () => { rc.total = sum; redraw(); };
     b.append(useSum);
     box.append(b);
@@ -1671,7 +1690,7 @@ function renderConfirm() {
   const cta = el('div', { style: 'margin-top:14px;display:flex;flex-direction:column;gap:10px' });
   const save = el('button', { className: 'btn primary wide',
     textContent: isDraft
-      ? `確認儲存（${d.lines.length} 筆明細 · ${local(rc.total)}）`
+      ? `確認儲存（${d.lines.length} 筆明細 · ${amt(rc.total, cur)}）`
       : `儲存變更（${d.lines.length} 筆明細）` });
   save.disabled = !balanced;
   if (!balanced) save.style.opacity = '.5';
@@ -1711,7 +1730,7 @@ async function saveConfirm() {
   await db.saveReceipt(receipt, toRecords(receipt, d.lines));
   await reload();
   closeConfirm();
-  banner('info', `已存 ${receipt.storeName || '這張收據'}　${local(receipt.total)}（${d.lines.length} 筆明細）`);
+  banner('info', `已存 ${receipt.storeName || '這張收據'}　${amt(receipt.total, receipt.currency)}（${d.lines.length} 筆明細）`);
 }
 
 /** 確認頁右下角那個「≈ S$xx」。算式在 model.js，這裡只是借過來用。 */
