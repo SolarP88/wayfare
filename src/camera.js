@@ -41,6 +41,20 @@ export async function toBase64(blob) {
 }
 
 /**
+ * base64 → Blob。`toBase64` 的反向，還原備份時用。
+ *
+ * ⚠️ 2026-09-08 才發現備份匯出了照片、還原卻沒放回去——
+ * 備份鈕上寫著「含照片」，還原完照片全沒了，而且**不會報錯**。
+ * 照片是規格 §4 的第一順位（參考專案作者的第一個遺憾就是沒留照片）。
+ */
+export function fromBase64(b64, type = 'image/jpeg') {
+  const bin = atob(String(b64 || ''));
+  const buf = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  return new Blob([buf], { type });
+}
+
+/**
  * 抓一次座標。**永不 reject** —— 定位失敗不可以擋住拍照（§8 三層 fallback）。
  * 抓不到就回 null，之後退回行程表，再不行由使用者手動選。
  */

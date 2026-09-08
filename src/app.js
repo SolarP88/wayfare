@@ -20,7 +20,9 @@ import { priceDiscountTotal } from './country-rules/japan.js';
 import * as db from './db.js';
 import { createQueue, STATUS } from './queue.js';
 import { configureRateLimit } from './gemini.js';
-import { compress, toBase64, getCoords, cityFromSchedule, parseSchedule } from './camera.js';
+import {
+  compress, toBase64, fromBase64, getCoords, cityFromSchedule, parseSchedule,
+} from './camera.js';
 import { fetchReferenceRate, compareToSettings } from './fx.js';
 import {
   buildWorkbook, toCSV, buildBackup, parseBackup, receiptsFromLegacyRecords,
@@ -1297,10 +1299,14 @@ function renderSettings() {
    * 她把 2026-09-11 打成 2026-0911，整行被丟掉、清單那格一直沒打勾，
    * 而她根本沒看到那句黃字。現在：即時驗、講清楚第幾行錯在哪、成功也說一聲。
    */
-  const applySchedule = async () => {
+  const applySchedule = async (persist = true) => {
     const { rows, bad } = parseSchedule(ta.value, { tripStart: state.settings.tripStart });
-    state.settings.schedule = rows;
-    await db.saveSettings(state.settings);
+    // ⚠️ 開場那一次**只畫不存**。存的話等於「一打開設定頁就把記憶體狀態寫回 DB」，
+    //    剛還原完備份、記憶體還是舊的，一重畫就把還原的設定蓋掉了（2026-09-08 實測撞到）。
+    if (persist) {
+      state.settings.schedule = rows;
+      await db.saveSettings(state.settings);
+    }
     renderPreflight();
 
     schOut.textContent = '';
@@ -1325,7 +1331,7 @@ function renderSettings() {
   ta.onchange = () => { clearTimeout(schTimer); applySchedule(); };
 
   sch.append(el('div', { className: 'field' }, [ta]), schOut);
-  applySchedule();
+  applySchedule(false);      // 只是把現況畫出來，不要寫回資料庫
 
   const api = $('settingsApi'); api.textContent = '';
   settingField(api, 'apiKey', 'Gemini API key', 'password');
@@ -1434,7 +1440,10 @@ async function importBackup(e) {
     banner('bad', `備份檔有問題，整份沒有匯入：${err.message}`);
     return;
   }
-  if (!confirm(`要匯入 ${b.records.length} 筆紀錄嗎？現有資料會被合併（同 id 覆蓋）。`)) return;
+  const photoTotal = Object.values(b.photos || {}).reduce((n, a) => n + (a?.length || 0), 0);
+  if (!confirm(`要匯入 ${b.records.length} 筆紀錄`
+    + `${photoTotal ? `、${photoTotal} 張照片` : '（這份備份沒有照片）'}嗎？`
+    + '現有資料會被合併（同 id 覆蓋），設定會被備份檔裡的取代。')) return;
 
   // v1 備份沒有 receipts（那時候一筆就是一張收據）→ 現場補出來，不要讓它變孤兒
   const receipts = b.receipts?.length ? b.receipts : receiptsFromLegacyRecords(b.records);
@@ -1443,8 +1452,44 @@ async function importBackup(e) {
     await db.put(db.STORES.records, r.receiptId ? r : { ...r, receiptId: r.id, seq: 1, status: 'confirmed' });
   }
   for (const w of b.walletOps) await db.put(db.STORES.wallet, w);
+
+  // 照片。**這段 2026-09-08 之前是漏的**——備份鈕寫著「含照片」，
+  // 匯出時照片確實有進去，還原卻整批不見，而且靜靜地不報錯。
+  // 換手機／從 Safari 搬到主畫面 App 的人會以為照片沒了。
+  let photoCount = 0;
+  for (const [receiptId, list] of Object.entries(b.photos || {})) {
+    for (const [i, b64] of (list || []).entries()) {
+      try {
+        await db.put(db.STORES.photos, {
+          id: `${receiptId}:restored:${i}`,
+          receiptId,
+          recordId: receiptId,          // v1 的索引還在用這個欄位
+          blob: fromBase64(b64),
+          at: b.exportedAt || new Date().toISOString(),
+        });
+        photoCount += 1;
+      } catch (err) {
+        // 一張壞掉不該讓整份匯入失敗，但一定要講出來
+        banner('warn', `有一張照片還原失敗（${receiptId}）：${err.message}`);
+      }
+    }
+  }
+
+  // 設定也要跟著搬（匯率、行程、付款人、Wise 初始…）。
+  // ⚠️ **API key 不在備份檔裡**（刻意的，key 不進備份），所以保留這台自己的，
+  //    不要用備份裡的 undefined 把它蓋掉——那會讓辨識突然停擺。
+  if (b.settings) {
+    const here = await db.get(db.STORES.settings, 'main');
+    await db.saveSettings({ ...b.settings, apiKey: here?.apiKey || '' });
+    // 記憶體也要跟上，否則接下來任何一次「存設定」都會拿舊的蓋掉剛還原的
+    state.settings = await db.loadSettings(defaultSettings());
+    configureRateLimit({ rpm: state.settings.rpm ?? 15 });
+  }
+
   await reload(); render();
-  banner('info', `已匯入 ${receipts.length} 張收據、${b.records.length} 筆明細`);
+  banner('info',
+    `已匯入 ${receipts.length} 張收據、${b.records.length} 筆明細、${photoCount} 張照片`
+    + (b.settings ? '，設定也一起還原了（API key 保留這台原本的）' : ''));
 }
 
 // ---------------------------------------------------------------------------
