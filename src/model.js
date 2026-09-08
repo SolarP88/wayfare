@@ -29,6 +29,7 @@ export function symbolOf(code) {
 
 export function defaultSettings() {
   return {
+    tripName: '',               // 行程名稱，首頁最上面那行大字
     homeCurrency: 'SGD',
     localCurrency: 'JPY',
     tripStart: null,
@@ -66,6 +67,22 @@ export function localStamp(d = new Date()) {
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
     + `T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+const WEEKDAY_ZH = ['日', '一', '二', '三', '四', '五', '六'];
+
+/**
+ * `2026-12-01` → `2026-12-01（二）`。
+ *
+ * ⛔ 星期一律讓程式算，不准心算也不准手打（她的規則，2026-08-09 踩過）。
+ * ⚠️ 用 `new Date('2026-12-01')` 會被當成 UTC 午夜，某些時區會退一天；
+ *    所以拆成年月日自己組。
+ */
+export function withWeekday(dateish) {
+  const d = localDay(dateish);
+  if (!d) return '';
+  const [y, m, day] = d.split('-').map(Number);
+  return `${d}（${WEEKDAY_ZH[new Date(y, m - 1, day).getDay()]}）`;
 }
 
 /** 今天（手機時區）。 */

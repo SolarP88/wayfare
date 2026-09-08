@@ -8,7 +8,7 @@
 
 import {
   defaultSettings, derive, symbolOf, localDay, tripDays, dayOfTrip, isSpending,
-  localStamp, localToday, CATEGORIES, PAYMENT_METHODS,
+  localStamp, localToday, withWeekday, CATEGORIES, PAYMENT_METHODS,
 } from './model.js';
 import { cashBalance, potBalance, makeCorrection, cashBurn, pendingRefund } from './wallet.js';
 import {
@@ -182,12 +182,15 @@ function render() {
 
 function renderHeader() {
   const s = state.settings;
-  const total = tripDays(s);
   const n = dayOfTrip(todayLocal(), s);
-  $('title').textContent = '旅行記帳';
-  $('subtitle').textContent = total
-    ? (n ? `Day ${n} of ${total}　${todayLocal()}` : `行程 ${s.tripStart} ~ ${s.tripEnd}（尚未開始或已結束）`)
-    : '還沒設定行程 —— 去設定頁填行程起訖日';
+  // 行程名稱是她自己取的（設定頁填），沒填就退回通用名字
+  $('title').textContent = s.tripName?.trim() || '旅行記帳';
+  // Day N 在「旅程天數」那塊磚上已經有了，這裡不重複，改印今天是幾號星期幾
+  $('subtitle').textContent = n
+    ? withWeekday(todayLocal())
+    : (s.tripStart && s.tripEnd
+      ? `${withWeekday(s.tripStart)} ~ ${withWeekday(s.tripEnd)}`
+      : '還沒設定行程 —— 去設定頁填行程起訖日');
 }
 
 /**
@@ -378,7 +381,9 @@ function renderHome() {
 function recRow(r, showDate = false) {
   const [icon, cls] = catMeta(r.category);
   const meta = el('div', { className: 'meta' }, [
-    el('span', { className: 'tag', textContent: r.isTopUp ? '儲值' : (r.category || '其他') }),
+    // 有第二個人時類別退成彩色小標籤（左圓讓給頭像）；一個人用維持原樣
+    el('span', { className: multiPayer() ? 'catchip' : 'tag',
+      textContent: r.isTopUp ? '儲值' : (r.category || '其他') }),
   ]);
   // 一列 = 一個品項時，主標印**品項名**，店名退到副標。
   // 不這樣做的話，按類別看那一頁會出現五次「松本清」，等於什麼都沒說。
@@ -398,10 +403,12 @@ function recRow(r, showDate = false) {
   title.append(document.createTextNode(
     asLine ? r.name : (r.storeName || r.storeNameLocal || '(未命名)')));
 
-  const avatar = el('span', { className: 'av', textContent: icon, style: 'position:relative' });
-  if (multiPayer()) {
-    avatar.append(el('i', { className: `who ${payerClass(r.payer)}`, title: payerName(r.payer) }));
-  }
+  // 兩個人記帳時，左圓＝誰付的（她 2026-09-08 看了參考 App 決定翻掉 9/03 的做法）；
+  // 只有一個人時放類別圖示，因為那時候「誰付的」不是問題。
+  const avatar = multiPayer()
+    ? el('span', { className: `face ${payerClass(r.payer)}`,
+        textContent: payerFace(r.payer), title: payerName(r.payer) })
+    : el('span', { className: 'av', textContent: icon });
 
   const row = el('div', { className: `rec ${cls}` }, [
     avatar,
@@ -479,6 +486,15 @@ const payerOptions = () =>
 const payerName = (id) =>
   (state.settings.payers || []).find((p) => p.id === id)?.name || id || '';
 
+const FACE_DEFAULT = ['🧕', '🧑'];
+
+/** 付款人的頭像 emoji。她可以在設定頁換成任何一個 emoji。 */
+const payerFace = (id) => {
+  const list = state.settings.payers || [];
+  const i = list.findIndex((p) => p.id === id);
+  return list[i]?.emoji || FACE_DEFAULT[i] || '🙂';
+};
+
 /** 付款人的色票 class（`p-1` / `p-2`）。順序照設定頁那兩格。 */
 const payerClass = (id) => {
   const i = (state.settings.payers || []).findIndex((p) => p.id === id);
@@ -501,6 +517,7 @@ const escape = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': 
  * 小計只算現場花費（排除儲值與行前），跟首頁的累計用同一條規則，不然兩邊對不起來。
  */
 function renderGroups(rows) {
+  const cur = state.settings.localCurrency;
   const box = $('recGroups');
   box.textContent = '';
   if (!rows.length) {
@@ -547,9 +564,13 @@ function renderGroups(rows) {
       label = k;
       right = homeM(shown(k));
     } else {
-      const d = dayOfTrip(k, state.settings);
-      label = k.slice(5).replace('-', '/') + (d ? `　Day ${d}` : '');
-      right = homeM(shown(k));
+      // 她 2026-09-08 指定：要「2026-12-01（二）」這種完整日期，不要「Day 3」
+      // （Day N 在首頁那塊磚上已經有了）。星期一律程式算，不手打。
+      label = withWeekday(k);
+      const localSum = list
+        .filter((r) => isSpending(r) && (r.currency || cur) === cur)
+        .reduce((a, r) => a + (r.amount || 0), 0);
+      right = `${amt(localSum, cur)}　≈ ${homeM(shown(k))}`;
     }
 
     box.append(el('div', { className: 'dayhd' }, [
@@ -1340,6 +1361,7 @@ function wireSettings() {
 function renderSettings() {
   renderThemeChips();
   const basic = $('settingsBasic'); basic.textContent = '';
+  settingField(basic, 'tripName', '行程名稱（首頁最上面那行）', 'text');
   settingField(basic, 'homeCurrency', '本位幣', 'text', ['SGD', 'MYR', 'TWD', 'USD', 'EUR']);
   settingField(basic, 'localCurrency', '當地幣別', 'text', ['JPY', 'KRW', 'TWD', 'THB']);
   settingField(basic, 'tripStart', '行程首日', 'date');
@@ -1387,6 +1409,15 @@ function renderSettings() {
     };
     cashW.append(cash);
 
+    const faceW = el('div', { className: 'field' }, [el('label', { textContent: '頭像（一個 emoji）' })]);
+    const face = el('input', { value: p.emoji || FACE_DEFAULT[i] || '🙂', maxLength: 4 });
+    face.onchange = async () => {
+      state.settings.payers[i].emoji = face.value.trim() || FACE_DEFAULT[i];
+      await db.saveSettings(state.settings);
+      render();
+    };
+    faceW.append(face);
+
     const wiseW = el('div', { className: 'field' }, [el('label', { textContent: 'Wise 初始日圓（沒用留 0）' })]);
     const wise = el('input', { type: 'number', inputMode: 'numeric', value: p.initialWise || 0 });
     wise.onchange = async () => {
@@ -1402,7 +1433,7 @@ function renderSettings() {
     };
     wiseW.append(wise);
 
-    payers.append(nameW, cashW, wiseW);
+    payers.append(nameW, faceW, cashW, wiseW);
   });
 
   const sch = $('settingsSchedule'); sch.textContent = '';

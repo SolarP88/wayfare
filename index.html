@@ -65,6 +65,14 @@
    不做頭像——列表掃視的主軸是類別，而且雪地戴手套時一塊顏色比一張小臉好認（§14）。 */
 .who{position:absolute;right:-2px;bottom:-2px;width:15px;height:15px;border-radius:50%;
      border:2.5px solid var(--card);box-shadow:0 0 0 .5px rgba(0,0,0,.06)}
+/* 頭像：左圓改成「誰付的」。一個人用的時候退回類別圖示（見 app.js 的 multiPayer）。 */
+.face{width:44px;height:44px;flex:none;border-radius:50%;display:grid;place-items:center;
+      font-size:23px;background:color-mix(in srgb,var(--pc,#527A96) 17%,transparent);
+      border:1.5px solid color-mix(in srgb,var(--pc,#527A96) 42%,transparent)}
+.p-1{--pc:#527A96}.p-2{--pc:#C9803F}
+/* 類別退到有顏色的小標籤（跟參考 App 同形狀） */
+.catchip{font-size:12px;font-weight:600;border-radius:7px;padding:1.5px 8px;
+         color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent)}
 .p-1{background:#527A96}.p-2{background:#C9803F}
 .pdot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;
       vertical-align:-1px}
@@ -127,7 +135,7 @@ button,select,input,textarea{font:inherit;color:inherit}
 .tile{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
       padding:13px 14px 14px;box-shadow:var(--shadow)}
 .tile .top{display:flex;align-items:center;gap:8px;margin-bottom:9px}
-.tile .ic{width:26px;height:26px;border-radius:9px;background:var(--accent-soft);
+.tile .ic{width:26px;height:26px;border-radius:9px;background:color-mix(in srgb,var(--tc,#527A96) 17%,transparent);
           display:grid;place-items:center;font-size:14px;flex:0 0 auto}
 .tile .lb{font-size:13.5px;color:var(--muted);font-weight:600}
 .tile .v{font-size:25px;font-weight:700;letter-spacing:-.02em;line-height:1.15}
@@ -271,24 +279,24 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
   <section id="tab-home">
     <!-- hero 2×2：一眼看到四個數字，不用捲 -->
     <div class="hero">
-      <div class="tile">
+      <div class="tile" style="--tc:#C97F5E">
         <div class="top"><span class="ic">📅</span><span class="lb">今日支出</span></div>
         <div class="v num" id="today">—</div>
         <div class="s num" id="todaySub"></div>
       </div>
-      <div class="tile">
+      <div class="tile" style="--tc:#527A96">
         <div class="top"><span class="ic">📊</span><span class="lb">旅程累計</span></div>
         <div class="v num" id="total">—</div>
         <div class="s num" id="totalSub"></div>
         <div class="s num" id="preTrip"></div>
       </div>
-      <div class="tile">
+      <div class="tile" style="--tc:#6FA394">
         <div class="top"><span class="ic">🎯</span><span class="lb">預算進度</span></div>
         <div class="v sm num" id="budgetPct">—</div>
         <div class="bar" id="budgetBar" style="margin-top:9px"><i style="width:0"></i></div>
         <div class="s num" id="budgetHint"></div>
       </div>
-      <div class="tile">
+      <div class="tile" style="--tc:#9887BC">
         <div class="top"><span class="ic">🗓️</span><span class="lb">旅程天數</span></div>
         <div class="v" id="dayN">—</div>
         <div class="s" id="dayNSub"></div>
