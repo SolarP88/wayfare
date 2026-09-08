@@ -178,7 +178,11 @@ button,select,input,textarea{font:inherit;color:inherit}
 .rec:last-child{border-bottom:0}
 .av{width:38px;height:38px;border-radius:12px;flex:0 0 auto;display:grid;place-items:center;
     font-size:16px;background:color-mix(in srgb,var(--c,#8C95A3) 16%,transparent)}
-.rec .mid2{flex:1;min-width:0}
+/* ⚠️ 這條要同時給紀錄列與排行榜。只寫 .rec 的話，排行榜的中間欄位有多長佔多長，
+   金額就被推到參差不齊的位置（2026-09-08 她一眼看出「那個 $ 不平」）。 */
+.rec .mid2,.rank .mid2{flex:1;min-width:0}
+.rank .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rank .amt{flex:0 0 auto;margin-left:auto}
 .rec .t{font-size:15.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .meta{display:flex;gap:7px;align-items:center;margin-top:4px;flex-wrap:wrap}
 .tag{font-size:12.5px;padding:2px 8px;border-radius:7px;font-weight:600;
