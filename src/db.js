@@ -295,6 +295,25 @@ export async function clearCover() {
 }
 
 // ---------------------------------------------------------------------------
+// 付款人頭像（她自己上傳的圖，例如 iPhone 的 Memoji）
+//
+// 跟封面照一樣放 settings store，鑰匙是 `avatar:<付款人id>`。
+// 不進 photos store —— 那邊是收據憑據，健檢與匯出都會掃。
+// ---------------------------------------------------------------------------
+
+export async function putAvatar(payerId, blob) {
+  return put(STORES.settings, { id: `avatar:${payerId}`, blob, at: new Date().toISOString() });
+}
+
+export async function getAvatar(payerId) {
+  return get(STORES.settings, `avatar:${payerId}`);
+}
+
+export async function clearAvatar(payerId) {
+  return del(STORES.settings, `avatar:${payerId}`);
+}
+
+// ---------------------------------------------------------------------------
 // 照片
 // ---------------------------------------------------------------------------
 

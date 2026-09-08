@@ -68,7 +68,12 @@
 /* 頭像：左圓改成「誰付的」。一個人用的時候退回類別圖示（見 app.js 的 multiPayer）。 */
 .face{width:44px;height:44px;flex:none;border-radius:50%;display:grid;place-items:center;
       font-size:23px;background:color-mix(in srgb,var(--pc,#527A96) 17%,transparent);
-      border:1.5px solid color-mix(in srgb,var(--pc,#527A96) 42%,transparent)}
+      border:1.5px solid color-mix(in srgb,var(--pc,#527A96) 42%,transparent);
+      overflow:hidden}
+/* 她上傳的圖。object-fit:cover 才不會把人臉壓扁 */
+img.face{object-fit:cover}
+.facePreview{width:56px;height:56px;border-radius:50%;object-fit:cover;
+             border:1px solid var(--line);margin-right:10px}
 .p-1{--pc:#527A96}.p-2{--pc:#C9803F}
 /* 類別退到有顏色的小標籤（跟參考 App 同形狀） */
 .catchip{font-size:12px;font-weight:600;border-radius:7px;padding:1.5px 8px;

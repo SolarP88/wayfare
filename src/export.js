@@ -202,7 +202,7 @@ export function toCSV(records, settings) {
  * 完整備份（含照片）。這才是能還原的那一份。
  * @param photosByRecord Map<recordId, string[]>  已轉成 base64 的照片
  */
-export function buildBackup({ records, walletOps, settings, photosByRecord, receipts, cover }) {
+export function buildBackup({ records, walletOps, settings, photosByRecord, receipts, cover, avatars }) {
   return {
     format: 'travel-receipt-app-backup',
     version: 2,                                    // v2 起多了 receipts，照片改綁 receiptId
@@ -215,6 +215,7 @@ export function buildBackup({ records, walletOps, settings, photosByRecord, rece
     },
     settings: { ...settings, apiKey: undefined },   // key 不進備份檔
     cover: cover || null,                          // 封面照（base64），沒選就是 null
+    avatars: avatars || {},                        // 付款人頭像（base64），沒放就是空的
     receipts: receipts || [],
     records,
     walletOps,

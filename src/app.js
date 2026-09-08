@@ -117,6 +117,23 @@ async function boot() {
   render();
 }
 
+/**
+ * 付款人的頭像圖（她上傳的）。
+ *
+ * 一次載好放記憶體，因為列表每一列都要用——每列各開一次 objectURL
+ * 會在捲動時漏掉一堆記憶體。重載時先把舊的收掉。
+ */
+const avatarUrls = new Map();
+async function loadAvatars() {
+  for (const url of avatarUrls.values()) URL.revokeObjectURL(url);
+  avatarUrls.clear();
+  for (const p of state.settings.payers || []) {
+    if (!p.name) continue;
+    const row = await db.getAvatar(p.id);
+    if (row?.blob) avatarUrls.set(p.id, URL.createObjectURL(row.blob));
+  }
+}
+
 async function reload() {
   const lines = await db.allRecords();
   state.receipts = await db.allReceipts();
@@ -129,6 +146,7 @@ async function reload() {
     .filter((r) => !draftIds.has(r.receiptId))
     .map((r) => derive(r, state.settings));
   state.wallet = await db.all(db.STORES.wallet);
+  await loadAvatars();
 }
 
 /** 這張收據底下、已經在記憶體裡的那幾筆品項。 */
@@ -309,8 +327,8 @@ function renderHome() {
   tabs.hidden = !multiPayer();
   if (multiPayer()) {
     for (const [id, name] of payerOptions()) {
-      const b = el('button', { className: 'chip' }, [
-        el('i', { className: `pdot ${payerClass(id)}` }),
+      const b = el('button', { className: 'chip', style: 'display:flex;align-items:center;gap:7px' }, [
+        payerAvatar(id, 22),
         document.createTextNode(`${name}　${local(cashBalance(id, state.records, state.wallet, s))}`),
       ]);
       b.setAttribute('aria-pressed', String(id === state.currentPayer));
@@ -429,8 +447,7 @@ function recRow(r, showDate = false) {
   // 兩個人記帳時，左圓＝誰付的（她 2026-09-08 看了參考 App 決定翻掉 9/03 的做法）；
   // 只有一個人時放類別圖示，因為那時候「誰付的」不是問題。
   const avatar = multiPayer()
-    ? el('span', { className: `face ${payerClass(r.payer)}`,
-        textContent: payerFace(r.payer), title: payerName(r.payer) })
+    ? payerAvatar(r.payer)
     : el('span', { className: 'av', textContent: icon });
 
   const row = el('div', { className: `rec ${cls}` }, [
@@ -517,6 +534,16 @@ const payerFace = (id) => {
   const i = list.findIndex((p) => p.id === id);
   return list[i]?.emoji || FACE_DEFAULT[i] || '🙂';
 };
+
+/** 一顆頭像：有上傳圖就用圖，沒有就用 emoji。 */
+function payerAvatar(id, size) {
+  const url = avatarUrls.get(id);
+  const style = size ? `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.55)}px` : '';
+  return url
+    ? el('img', { className: `face ${payerClass(id)}`, src: url, alt: payerName(id), style })
+    : el('span', { className: `face ${payerClass(id)}`, textContent: payerFace(id),
+        title: payerName(id), style });
+}
 
 /** 付款人的色票 class（`p-1` / `p-2`）。順序照設定頁那兩格。 */
 const payerClass = (id) => {
@@ -852,8 +879,8 @@ function renderScan() {
     const box = $('scanPayer');
     box.textContent = '';
     for (const [id, name] of payerOptions()) {
-      const b = el('button', { className: 'chip' }, [
-        el('i', { className: `pdot ${payerClass(id)}` }),
+      const b = el('button', { className: 'chip', style: 'display:flex;align-items:center;gap:7px' }, [
+        payerAvatar(id, 22),
         document.createTextNode(name),
       ]);
       b.setAttribute('aria-pressed', String(id === state.currentPayer));
@@ -1458,14 +1485,53 @@ function renderSettings() {
     };
     cashW.append(cash);
 
-    const faceW = el('div', { className: 'field' }, [el('label', { textContent: '頭像（一個 emoji）' })]);
+    // 頭像：上傳一張圖（Memoji、自拍都行），或退而求其次用一個 emoji
+    const faceW = el('div', { className: 'field' }, [el('label', { textContent: '頭像' })]);
+    const faceRow = el('div', { style: 'display:flex;align-items:center;gap:8px' });
+    const url = avatarUrls.get(p.id);
+    if (url) faceRow.append(el('img', { className: 'facePreview', src: url, alt: '' }));
+
+    const pick = el('input', { type: 'file', accept: 'image/*', hidden: true });
+    pick.onchange = async (ev) => {
+      const file = ev.target.files[0];
+      ev.target.value = '';
+      if (!file) return;
+      try {
+        // 只有 44px 大，壓到 256 就綽綽有餘（手機原圖動輒 4MB）
+        const shot = await compress(file, 256, 0.85);
+        await db.putAvatar(p.id, shot.blob);
+        await reload();
+        render();
+      } catch (err) {
+        banner('bad', `這張圖處理失敗：${err.message}`);
+      }
+    };
+    const pickBtn = el('button', { className: 'btn', textContent: url ? '換一張' : '選一張照片',
+      style: 'flex:1;min-height:44px' });
+    pickBtn.onclick = () => pick.click();
+    faceRow.append(pick, pickBtn);
+
+    if (url) {
+      const rm = el('button', { className: 'btn danger', textContent: '移除',
+        style: 'min-height:44px' });
+      rm.onclick = async () => {
+        await db.clearAvatar(p.id);
+        await reload();
+        render();
+      };
+      faceRow.append(rm);
+    }
+    faceW.append(faceRow);
+
+    const emojiW = el('div', { className: 'field' }, [
+      el('label', { textContent: '沒放照片時用的 emoji' })]);
     const face = el('input', { value: p.emoji || FACE_DEFAULT[i] || '🙂', maxLength: 4 });
     face.onchange = async () => {
       state.settings.payers[i].emoji = face.value.trim() || FACE_DEFAULT[i];
       await db.saveSettings(state.settings);
       render();
     };
-    faceW.append(face);
+    emojiW.append(face);
 
     const wiseW = el('div', { className: 'field' }, [el('label', { textContent: 'Wise 初始日圓（沒用留 0）' })]);
     const wise = el('input', { type: 'number', inputMode: 'numeric', value: p.initialWise || 0 });
@@ -1482,7 +1548,7 @@ function renderSettings() {
     };
     wiseW.append(wise);
 
-    payers.append(nameW, faceW, cashW, wiseW);
+    payers.append(nameW, faceW, emojiW, cashW, wiseW);
   });
 
   const sch = $('settingsSchedule'); sch.textContent = '';
@@ -1640,6 +1706,14 @@ async function exportBackup() {
     records: state.records, receipts: state.receipts,
     walletOps: state.wallet, settings: state.settings, photosByRecord,
     cover: coverRow?.blob ? await toBase64(coverRow.blob) : null,
+    avatars: await (async () => {
+      const out = {};
+      for (const p of state.settings.payers || []) {
+        const row = await db.getAvatar(p.id);
+        if (row?.blob) out[p.id] = await toBase64(row.blob);
+      }
+      return out;
+    })(),
   });
   download(new Blob([JSON.stringify(backup)], { type: 'application/json' }),
            `旅行記帳_備份_${stamp()}.json`);
@@ -1700,6 +1774,9 @@ async function importBackup(e) {
   //    不要用備份裡的 undefined 把它蓋掉——那會讓辨識突然停擺。
   if (b.cover) {
     try { await db.putCover(fromBase64(b.cover)); } catch { /* 封面壞掉不該擋住整份匯入 */ }
+  }
+  for (const [pid, b64] of Object.entries(b.avatars || {})) {
+    try { await db.putAvatar(pid, fromBase64(b64)); } catch { /* 同上 */ }
   }
 
   if (b.settings) {
