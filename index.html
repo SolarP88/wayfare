@@ -61,6 +61,14 @@
     --shadow:0 1px 2px rgba(0,0,0,.25), 0 6px 18px rgba(0,0,0,.22);
 }
 /* 分類色票：跟主色分開，換主色不影響辨識 */
+/* 付款人色點：貼在左圓右下角。兩個人用兩個顏色就夠分，
+   不做頭像——列表掃視的主軸是類別，而且雪地戴手套時一塊顏色比一張小臉好認（§14）。 */
+.who{position:absolute;right:-2px;bottom:-2px;width:15px;height:15px;border-radius:50%;
+     border:2.5px solid var(--card);box-shadow:0 0 0 .5px rgba(0,0,0,.06)}
+.p-1{background:#527A96}.p-2{background:#C9803F}
+.pdot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;
+      vertical-align:-1px}
+
 .c-food{--c:#C97F5E}.c-tran{--c:#6F93B5}.c-shop{--c:#B98098}.c-tick{--c:#9887BC}
 .c-stay{--c:#6FA394}.c-med{--c:#C08181}.c-etc{--c:#8C95A3}
 

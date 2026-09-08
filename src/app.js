@@ -283,8 +283,10 @@ function renderHome() {
   tabs.hidden = !multiPayer();
   if (multiPayer()) {
     for (const [id, name] of payerOptions()) {
-      const b = el('button', { className: 'chip', textContent:
-        `${name}　${local(cashBalance(id, state.records, state.wallet, s))}` });
+      const b = el('button', { className: 'chip' }, [
+        el('i', { className: `pdot ${payerClass(id)}` }),
+        document.createTextNode(`${name}　${local(cashBalance(id, state.records, state.wallet, s))}`),
+      ]);
       b.setAttribute('aria-pressed', String(id === state.currentPayer));
       b.onclick = () => setPayer(id);
       tabs.append(b);
@@ -396,8 +398,13 @@ function recRow(r, showDate = false) {
   title.append(document.createTextNode(
     asLine ? r.name : (r.storeName || r.storeNameLocal || '(未命名)')));
 
+  const avatar = el('span', { className: 'av', textContent: icon, style: 'position:relative' });
+  if (multiPayer()) {
+    avatar.append(el('i', { className: `who ${payerClass(r.payer)}`, title: payerName(r.payer) }));
+  }
+
   const row = el('div', { className: `rec ${cls}` }, [
-    el('span', { className: 'av', textContent: icon }),
+    avatar,
     el('div', { className: 'mid2' }, [title, meta]),
     el('div', { className: 'amt' }, [
       el('div', { className: 'a num', textContent: amt(r.amount, r.currency) }),
@@ -471,6 +478,12 @@ const payerOptions = () =>
 /** 付款人的名字（`p1` 是內部代號，不給人看）。 */
 const payerName = (id) =>
   (state.settings.payers || []).find((p) => p.id === id)?.name || id || '';
+
+/** 付款人的色票 class（`p-1` / `p-2`）。順序照設定頁那兩格。 */
+const payerClass = (id) => {
+  const i = (state.settings.payers || []).findIndex((p) => p.id === id);
+  return `p-${(i < 0 ? 0 : i) + 1}`;
+};
 
 /** 有沒有第二個人。只有一個人時，所有跟付款人有關的東西都不顯示。 */
 const multiPayer = () => payerOptions().length > 1;
@@ -795,7 +808,10 @@ function renderScan() {
     const box = $('scanPayer');
     box.textContent = '';
     for (const [id, name] of payerOptions()) {
-      const b = el('button', { className: 'chip', textContent: name });
+      const b = el('button', { className: 'chip' }, [
+        el('i', { className: `pdot ${payerClass(id)}` }),
+        document.createTextNode(name),
+      ]);
       b.setAttribute('aria-pressed', String(id === state.currentPayer));
       b.onclick = () => setPayer(id);
       box.append(b);
