@@ -14,6 +14,7 @@ import { cashBalance, potBalance, makeCorrection, cashBurn, pendingRefund } from
 import {
   todayTotal, tripTotal, preTripTotal, byCategory, byPayment, byCity, byPayer,
   dailySeries, budgetProgress, topSpends, healthCheck, onTripSpending,
+  tripTotalLocal, todayTotalLocal, otherCurrencyTotal,
 } from './stats.js';
 import { buildLines, toRecords, isBalanced, decimalsOf } from './split.js';
 import { priceDiscountTotal } from './country-rules/japan.js';
@@ -309,8 +310,14 @@ function renderHome() {
       (tight ? ' —— 行程還有 ' + remain + ' 天，該去領錢了' : '');
   }
 
-  $('today').textContent = homeM(todayTotal(state.records, todayLocal()));
-  $('total').textContent = homeM(tripTotal(state.records));
+  // §9：**原幣大字、本位幣小字**。日圓才是現場花錢時腦子裡的單位，
+  // 本位幣是回家算帳用的。首頁這兩塊原本反過來（2026-09-08 她對照參考 App 發現）。
+  const cur = s.localCurrency;
+  $('today').textContent = amt(todayTotalLocal(state.records, todayLocal(), cur), cur);
+  $('total').textContent = amt(tripTotalLocal(state.records, cur), cur);
+  const other = otherCurrencyTotal(state.records, cur);
+  $('totalSub').textContent = `≈ ${homeM(tripTotal(state.records))}`
+    + (other ? `（含其他幣別 ${homeM(other)}）` : '');
 
   // 旅程天數磚。行程外（還沒出發／已回國）不硬湊一個 Day N 出來。
   const dn = dayOfTrip(todayLocal(), s);
@@ -343,7 +350,7 @@ function renderHome() {
   // ⚠️ 不可以把不同幣別的原幣金額加在一起（S$200 + ¥550 是沒有意義的數字）。
   //    要加總就加**換算後的本位幣**，那是唯一共通的單位。
   const todaySum = today.reduce((acc, r) => acc + (r.amountHome ?? 0), 0);
-  $('todaySub').textContent = today.length ? `${homeM(todaySum)} · ${today.length} 筆` : '';
+  $('todaySub').textContent = today.length ? `≈ ${homeM(todaySum)} · ${today.length} 筆` : '';
   fillList($('todayList'), today, '今天還沒有紀錄');
 }
 

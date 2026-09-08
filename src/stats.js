@@ -73,6 +73,33 @@ export function tripTotal(records) {
   return onTripSpending(records).reduce((s, r) => s + home(r), 0);
 }
 
+/**
+ * 當地幣的總額（§9：原幣大字、本位幣小字）。
+ *
+ * ⚠️ **只加當地幣的那幾筆**。不同幣別的原幣金額不可以相加——
+ * S$200 + ¥550 是一個沒有意義的數字。其他幣別的部分請用本位幣那條線去看。
+ */
+export function tripTotalLocal(records, localCurrency) {
+  return onTripSpending(records)
+    .filter((r) => (r.currency || localCurrency) === localCurrency)
+    .reduce((s, r) => s + local(r), 0);
+}
+
+export function todayTotalLocal(records, today, localCurrency) {
+  const d = localDay(today);
+  return onTripSpending(records)
+    .filter((r) => localDay(r.date) === d)
+    .filter((r) => (r.currency || localCurrency) === localCurrency)
+    .reduce((s, r) => s + local(r), 0);
+}
+
+/** 這批裡有沒有「不是當地幣」的花費（有的話畫面要講一聲，不然大小字對不起來）。 */
+export function otherCurrencyTotal(records, localCurrency) {
+  return onTripSpending(records)
+    .filter((r) => (r.currency || localCurrency) !== localCurrency)
+    .reduce((s, r) => s + home(r), 0);
+}
+
 /** TOP 10 花費（原幣大字、本位幣小字，所以兩個都留）。 */
 export function topSpends(records, n = 10) {
   return onTripSpending(records)
