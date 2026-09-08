@@ -51,6 +51,28 @@ export function defaultSettings() {
   };
 }
 
+/**
+ * 現在幾點幾分，**用手機自己的時區**，格式 `YYYY-MM-DDTHH:MM`。
+ *
+ * ⛔ 不可以用 `new Date().toISOString()` —— 那是 UTC。
+ * 2026-09-08 她在新加坡 15:58 記一筆，列表印成 07:58（差 8 小時）。
+ * 在日本更糟：JST 是 UTC+9，**早上 00:00–09:00 記的帳會被算成前一天**，
+ * 每日曲線、今日支出、Day N 全部歪掉（正是 §16 第 10 條要防的那件事）。
+ *
+ * 為什麼用手機時區而不是設定裡的當地時區：人在日本時手機本來就是日本時間，
+ * 兩者相同；而「現在幾點」跟手機螢幕上的鐘不一致才是最讓人困惑的。
+ */
+export function localStamp(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+    + `T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** 今天（手機時區）。 */
+export function localToday(d = new Date()) {
+  return localStamp(d).slice(0, 10);
+}
+
 /** 只取日期部分，避免時區把「今天」推掉一天（§16 第 10 條）。 */
 export function localDay(dateish) {
   if (!dateish) return null;

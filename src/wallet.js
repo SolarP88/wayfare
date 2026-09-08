@@ -7,7 +7,7 @@
  * **每位付款人各一個錢包**——別人用自己的現金付，不可以扣到你的餘額。
  */
 
-import { localDay } from './model.js';
+import { localDay, localToday } from './model.js';
 
 /** 錢包操作的種類。消費不在這裡，消費是從 records 推的。 */
 export const WALLET_OPS = {
@@ -117,7 +117,7 @@ export function makeCorrection({ payerId, pot = 'cash', actualBalance, records, 
  */
 export function cashBurn(payerId, records, walletOps, settings, today) {
   const start = localDay(settings.tripStart);
-  const now = localDay(today) || localDay(new Date().toISOString());
+  const now = localDay(today) || localToday();
   if (!start || !now) return null;
 
   const elapsedDays = Math.floor((Date.parse(now) - Date.parse(start)) / 86400000) + 1;

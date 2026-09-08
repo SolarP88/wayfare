@@ -8,7 +8,7 @@
 
 import {
   defaultSettings, derive, symbolOf, localDay, tripDays, dayOfTrip, isSpending,
-  CATEGORIES, PAYMENT_METHODS,
+  localStamp, localToday, CATEGORIES, PAYMENT_METHODS,
 } from './model.js';
 import { cashBalance, potBalance, makeCorrection, cashBurn, pendingRefund } from './wallet.js';
 import {
@@ -75,12 +75,9 @@ const homeM = (n) => (n == null ? '—' : `${symbolOf(state.settings.homeCurrenc
 
 /** 今天（用當地時區判斷，§16 第 10 條：晚上 11:30 吃拉麵不可以歸錯天）。 */
 function todayLocal() {
-  const tz = state.settings.localTimezone || 'Asia/Tokyo';
-  try {
-    return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
-  } catch {
-    return new Date().toISOString().slice(0, 10);
-  }
+  // 跟每一筆紀錄的時間戳走**同一個鐘**（手機時區）。
+  // 原本這裡用寫死的 Asia/Tokyo、紀錄卻用 UTC，兩邊不同源，午夜前後一定對不上。
+  return localToday();
 }
 
 // ---------------------------------------------------------------------------
@@ -689,7 +686,7 @@ async function intake(file) {
     imageBase64: await toBase64(shot.blob),
     mimeType: 'image/jpeg',
     coords,
-    capturedAt: new Date().toISOString(),
+    capturedAt: localStamp(),          // 手機時區。AI 讀不到收據日期時會拿它當日期
   });
   renderScan();
 }
@@ -883,14 +880,14 @@ async function quickSave() {
   // 手打的也是一張收據（只有一行）。全系統只有一種形狀，統計與匯出才不用分兩套。
   const receipt = {
     id: crypto.randomUUID(),
-    date: now.toISOString().slice(0, 16),
+    date: localStamp(now),
     storeName: cat,
     total: amount,
     currency: state.settings.localCurrency,
     category: cat,
     paymentMethod: quickMethod(),
     payer: state.currentPayer,
-    city: cityFromSchedule(now.toISOString(), state.settings.schedule),
+    city: cityFromSchedule(localStamp(now), state.settings.schedule),
     citySource: 'schedule',
     entryMode: 'quick',
     needsReview: false,
@@ -952,7 +949,7 @@ function renderManual() {
       rec[input.dataset.key] = input.type === 'number' ? Number(input.value) : input.value;
     }
     if (!rec.amount) { banner('warn', '金額沒填'); return; }
-    if (!rec.date) rec.date = new Date().toISOString().slice(0, 16);
+    if (!rec.date) rec.date = localStamp();
     const receipt = { ...rec, total: rec.amount, status: db.RECEIPT_STATUS.confirmed };
     await db.saveReceipt(receipt, toRecords(receipt, buildLines(receipt).lines));
     await reload();
@@ -1395,7 +1392,7 @@ function download(blob, filename) {
   document.body.append(a); a.click(); a.remove();
 }
 
-function stamp() { return new Date().toISOString().slice(0, 10); }
+function stamp() { return localToday(); }
 
 function exportExcel() {
   try {
