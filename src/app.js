@@ -187,7 +187,7 @@ function wireHome() {
     '校正餘額', '實際數一次錢包，現在總共有多少？', async (actual) => {
       const op = makeCorrection({
         payerId: state.currentPayer, actualBalance: actual,
-        records: state.records, walletOps: state.wallet,
+        records: state.records, walletOps: state.wallet, settings: state.settings,
       });
       await db.put(db.STORES.wallet, op);
       await reload(); render();
@@ -204,7 +204,7 @@ function renderHome() {
     sel.append(el('option', { value: p.id, textContent: p.name, selected: p.id === state.currentPayer }));
   }
 
-  const bal = cashBalance(state.currentPayer, state.records, state.wallet);
+  const bal = cashBalance(state.currentPayer, state.records, state.wallet, s);
   $('cash').textContent = local(bal);
 
   const burn = cashBurn(state.currentPayer, state.records, state.wallet, s, todayLocal());
@@ -802,6 +802,10 @@ function renderManual() {
   }
   box.append(el('div', { className: 'sub', textContent:
     '日期早於行程首日會自動歸成「行前」，只計總數、不進每日曲線。' }));
+  // 幣別 + 現金 這個組合最容易被誤會，直接寫在表單下面（§11 錢包只裝當地幣）
+  box.append(el('div', { className: 'sub', style: 'margin-top:-8px', textContent:
+    `用${state.settings.homeCurrency}現金付的（例如在新加坡買的機票）不會扣${state.settings.localCurrency}現金錢包——` +
+    '錢包裝的是當地現金。' }));
 
   $('btnManualSave').onclick = async () => {
     const rec = { id: crypto.randomUUID(), entryMode: 'manual', needsReview: false };

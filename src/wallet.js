@@ -20,15 +20,24 @@ export const WALLET_OPS = {
 /**
  * 一筆紀錄會不會動到現金錢包。
  *
- * ⚠️ 兩個容易搞錯的地方：
+ * ⚠️ 三個容易搞錯的地方：
  *   · **儲值會扣錢包**。用現金儲 Suica，現金確實變少了——
  *     它不算「花費」（model.isSpending 排除它），但一定算「現金流出」。
  *     這兩件事分開判斷，不可以共用一個旗標。
  *   · **免税消費扣全額（含稅）**。新制在店裡是真的付了含稅價（§7.3），
  *     退税是之後的獨立收入。當下扣未稅價 = 餘額憑空多出一截。
+ *   · **錢包裝的是當地幣**（§11）。在新加坡用 SGD 現金付的機票，動到的是她的
+ *     新幣現金，不是日圓錢包——不看幣別的話，那筆 1,200 會被當成 1,200 円扣掉。
+ *     2026-09-08 實跑撞到（250,000 − 780 − 150 − **1,200** = 247,870）。
+ *
+ * @param settings 有給就比幣別；沒給就只看支付方式（舊呼叫端的行為）
  */
-export function affectsCash(r) {
-  return r.paymentMethod === '現金';
+export function affectsCash(r, settings) {
+  if (r.paymentMethod !== '現金') return false;
+  const wallet = settings?.localCurrency;
+  if (!wallet) return true;
+  // derive() 會把空的 currency 補成當地幣，所以這裡的 fallback 跟它一致
+  return (r.currency || wallet) === wallet;
 }
 
 /**
@@ -42,14 +51,14 @@ export function affectsCash(r) {
  *
  * 金額允許負數（退貨／退款），所以退款自然會加回來，不用另外處理。
  */
-export function cashBalance(payerId, records, walletOps) {
+export function cashBalance(payerId, records, walletOps, settings) {
   let bal = 0;
   for (const op of walletOps) {
     if (op.payerId !== payerId) continue;
     bal += op.type === 'correct' ? (op.delta || 0) : (op.amount || 0);
   }
   for (const r of records) {
-    if (r.payer !== payerId || !affectsCash(r)) continue;
+    if (r.payer !== payerId || !affectsCash(r, settings)) continue;
     bal -= r.amount || 0;
   }
   return bal;
@@ -61,8 +70,8 @@ export function cashBalance(payerId, records, walletOps) {
  * 差額**記成「未記錄支出」而不是假裝沒發生**（§16 第 1 條）——
  * 9 天一定會有漏記，沒有校正機制餘額會越走越偏，到後面就沒人信它了。
  */
-export function makeCorrection({ payerId, actualBalance, records, walletOps, at, note }) {
-  const current = cashBalance(payerId, records, walletOps);
+export function makeCorrection({ payerId, actualBalance, records, walletOps, settings, at, note }) {
+  const current = cashBalance(payerId, records, walletOps, settings);
   const delta = actualBalance - current;
   return {
     type: 'correct',
@@ -98,7 +107,7 @@ export function cashBurn(payerId, records, walletOps, settings, today) {
 
   let spent = 0;
   for (const r of records) {
-    if (r.payer !== payerId || !affectsCash(r) || r.isPreTrip) continue;
+    if (r.payer !== payerId || !affectsCash(r, settings) || r.isPreTrip) continue;
     const d = localDay(r.date);
     if (!d || Date.parse(d) < Date.parse(start) || Date.parse(d) > Date.parse(now)) continue;
     spent += r.amount || 0;
@@ -106,7 +115,7 @@ export function cashBurn(payerId, records, walletOps, settings, today) {
   if (spent <= 0) return null;
 
   const perDay = spent / elapsedDays;
-  const balance = cashBalance(payerId, records, walletOps);
+  const balance = cashBalance(payerId, records, walletOps, settings);
   return {
     perDay,
     balance,
