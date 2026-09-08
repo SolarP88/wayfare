@@ -115,8 +115,21 @@ async function reload() {
 /** 這張收據底下、已經在記憶體裡的那幾筆品項。 */
 const linesOf = (receiptId) => state.records.filter((r) => r.receiptId === receiptId);
 
-function banner(kind, text) {
-  $('banners').append(el('div', { className: `banner ${kind}`, textContent: text }));
+/**
+ * 首頁紅字。第三個參數給「點了會帶你去處理」的橫幅用——
+ * 只說「有 1 筆待確認」卻不告訴人在哪，等於沒說（她 2026-09-08 找紅點找不到）。
+ */
+function banner(kind, text, onClick) {
+  const b = el('div', { className: `banner ${kind}`, textContent: text });
+  if (onClick) {
+    b.style.cursor = 'pointer';
+    b.setAttribute('role', 'button');
+    b.setAttribute('tabindex', '0');
+    b.append(el('span', { textContent: '　→ 點這裡處理', style: 'font-weight:700' }));
+    b.onclick = onClick;
+    b.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } };
+  }
+  $('banners').append(b);
 }
 
 function clearBanners() { $('banners').textContent = ''; }
@@ -188,10 +201,18 @@ function renderWarnings() {
   if (!s.tripStart || !s.tripEnd) banner('warn', '還沒設行程起訖日，Day N、每日曲線、行前判斷都不會動。');
   // 沒確認的收據**不算進任何數字**，所以這條要顯眼——忘了確認，首頁會少一截。
   if (state.drafts.length) {
-    banner('warn', `有 ${state.drafts.length} 張收據還沒確認，先不計入統計與現金錢包。去掃描頁確認。`);
+    banner('warn', `有 ${state.drafts.length} 張收據還沒確認，先不計入統計與現金錢包。`,
+      () => { state.tab = 'scan'; render(); });
   }
   const red = state.records.filter((r) => r.needsReview && !r.reviewed).length;
-  if (red) banner('info', `有 ${red} 筆待確認（辨識驗算對不上），有空的時候點紅點進去修。`);
+  if (red) {
+    banner('info', `有 ${red} 筆辨識驗算對不上，需要你看一眼。`, () => {
+      state.tab = 'records';
+      state.filter = { ...state.filter, review: true };   // 直接篩出那幾筆，不用自己找紅點
+      state.search = '';
+      render();
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -491,6 +512,12 @@ function renderRecords() {
     b.onclick = () => { state.filter[key] = state.filter[key] === value ? null : value; renderRecords(); };
     chips.append(b);
   };
+  // 待確認擺第一個：那是唯一「需要動手」的篩選，其他都是看看而已
+  const rv = el('button', { className: 'chip', textContent: '⚠ 待確認' });
+  rv.setAttribute('aria-pressed', String(!!state.filter.review));
+  rv.onclick = () => { state.filter.review = !state.filter.review; renderRecords(); };
+  chips.append(rv);
+
   for (const c of CATEGORIES) add('category', c, c);
   for (const p of PAYMENT_METHODS) add('payment', p, p);
   for (const p of state.settings.payers || []) if (p.name) add('payer', p.id, p.name);
@@ -499,6 +526,7 @@ function renderRecords() {
 
   const q = state.search.toLowerCase();
   const rows = state.records
+    .filter((r) => !state.filter.review || (r.needsReview && !r.reviewed))
     .filter((r) => !state.filter.category || r.category === state.filter.category)
     .filter((r) => !state.filter.payment || r.paymentMethod === state.filter.payment)
     .filter((r) => !state.filter.payer || r.payer === state.filter.payer)
@@ -708,16 +736,21 @@ async function onRecognized(item) {
 
 function renderScan() {
   renderDrafts();
-  const q = queue?.summary() || { total: 0, items: [] };
-  $('qStat').textContent = q.total
-    ? `${q.done}/${q.total} 完成　${q.pending} 排隊　${q.failed} 失敗`
-    : '閒置';
+  const q = queue?.summary() || { total: 0, items: [], completed: 0 };
+  // 辨識完的會自己離開佇列，所以這裡只講「還在跑的」，外加一個累計數字
+  const bits = [];
+  if (q.pending) bits.push(`${q.pending} 排隊`);
+  if (q.running) bits.push(`${q.running} 辨識中`);
+  if (q.failed) bits.push(`${q.failed} 失敗`);
+  if (q.completed) bits.push(`已完成 ${q.completed} 張`);
+  $('qStat').textContent = bits.length ? bits.join('　') : '閒置';
   $('btnRetryAll').hidden = !q.failed;
 
   const ul = $('qList');
   ul.textContent = '';
   if (!q.items.length) {
-    ul.append(el('li', { className: 'sub', textContent: '沒有排隊中的照片' }));
+    ul.append(el('li', { className: 'sub', textContent:
+      q.completed ? '都辨識完了，去上面「待確認」確認內容' : '沒有排隊中的照片' }));
   }
   for (const it of q.items.slice(-12).reverse()) {
     const label = { [STATUS.pending]: '排隊中', [STATUS.running]: '辨識中…',
@@ -731,7 +764,13 @@ function renderScan() {
     if (it.status === STATUS.failed) {
       const b = el('button', { className: 'btn', textContent: '重試', style: 'min-height:44px' });
       b.onclick = (ev) => { ev.stopPropagation(); queue.retry(it.id); };
-      li.append(b);
+      // 兩個模型都試過還是不行的那種（模糊、拍歪），總得有辦法請它走
+      const d = el('button', { className: 'btn danger', textContent: '刪掉', style: 'min-height:44px' });
+      d.onclick = (ev) => {
+        ev.stopPropagation();
+        if (confirm('刪掉這張沒辨識出來的照片？照片本身還留著，可以去手動輸入自己補。')) queue.remove(it.id);
+      };
+      li.append(b, d);
     }
     ul.append(li);
   }

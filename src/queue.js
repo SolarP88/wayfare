@@ -25,12 +25,14 @@ export const STATUS = {
 export function createQueue({ getApiKey, getSettings, onUpdate, save }) {
   const items = new Map();
   let running = false;
+  let completed = 0;          // 這次開 App 以來辨識成功幾張（純粹給人看的計數）
 
   const emit = () => onUpdate?.(summary());
 
   function summary() {
     const list = [...items.values()];
     return {
+      completed,
       total: list.length,
       pending: list.filter((i) => i.status === STATUS.pending).length,
       running: list.filter((i) => i.status === STATUS.running).length,
@@ -107,6 +109,12 @@ export function createQueue({ getApiKey, getSettings, onUpdate, save }) {
         next.issues = v.issues;
         next.hardFail = v.hardFail;
         await save?.(next);
+
+        // 落地成草稿之後就把它請出佇列：東西已經在「待確認」那張卡上了，
+        // 留在這裡只是佔畫面（她 2026-09-08 問「那個辨識什麼的不能刪除嗎」），
+        // 而且每一筆都還抱著一張 base64 照片，不放掉很吃記憶體。
+        completed += 1;
+        items.delete(next.id);
       }
     } catch (e) {
       next.status = STATUS.failed;
@@ -124,5 +132,11 @@ export function createQueue({ getApiKey, getSettings, onUpdate, save }) {
     addEventListener('online', () => pump());
   }
 
-  return { add, retry, retryAllFailed, summary, pump, _items: items };
+  /** 手動請走一筆（失敗又不想再試的那種）。 */
+  function remove(id) {
+    items.delete(id);
+    emit();
+  }
+
+  return { add, retry, retryAllFailed, remove, summary, pump, _items: items };
 }
