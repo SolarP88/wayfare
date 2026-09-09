@@ -307,6 +307,19 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
         <div class="cs" id="coverSub"></div>
       </div>
     </div>
+    <!-- 今天還能花（2026-09-09）。
+         刻意放在 hero 上面、用最大的字：旅行中真正會一直看的就是這個數字。
+         2×2 小磚放不下它——站在藥妝店裡要一眼看到，不是瞇著眼找。 -->
+    <div class="card" id="allowanceCard" hidden>
+      <div class="row">
+        <div class="sub" id="allowanceLabel">今天還能花</div>
+        <div class="sub num" id="allowanceDays"></div>
+      </div>
+      <div class="big num" id="allowanceMain" style="margin-top:2px">—</div>
+      <div class="bar" id="allowanceBar" style="margin-top:10px"><i style="width:0"></i></div>
+      <div class="s num" id="allowanceSub" style="margin-top:7px"></div>
+    </div>
+
     <!-- hero 2×2：一眼看到四個數字，不用捲 -->
     <div class="hero">
       <div class="tile" style="--tc:#C97F5E">
@@ -459,9 +472,14 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
     <div class="card"><div class="sect" style="margin:0 0 12px">每日趨勢</div><div id="chartDaily"></div></div>
     <div class="card"><div class="sect" style="margin:0 0 12px">城市</div><div id="chartCity"></div></div>
     <div class="card"><div class="sect" style="margin:0 0 12px">付款人</div><div id="chartPayer"></div></div>
-    <div class="card"><div class="sect" style="margin:0 0 6px">待退稅累計</div>
+    <!-- 退税清單（2026-09-09）。原本這裡只有一個總額，站在機場櫃檯幫不上忙——
+         櫃檯要的是一張一張的收據。 -->
+    <div class="card">
+      <div class="sect" style="margin:0 0 6px">待退稅累計</div>
       <div class="big num" id="refundTotal">—</div>
-      <div class="sub">這是<strong>應收</strong>，不是已經省下來的錢</div></div>
+      <div class="sub">這是<strong>應收</strong>，不是已經省下來的錢</div>
+      <div id="refundList" style="margin-top:12px"></div>
+    </div>
     <div class="card"><div class="sect" style="margin:0 0 6px">花費前十名</div><div id="topList"></div></div>
   </section>
 

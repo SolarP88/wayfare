@@ -207,6 +207,7 @@ function migratedReceipt(r) {
     city: r.city, citySource: r.citySource, coords: r.coords,
     taxType: r.taxType, taxDetail: r.taxDetail,
     taxRefundPending: r.taxRefundPending, refundStatus: r.refundStatus,
+    refundActual: r.refundActual, refundedAt: r.refundedAt,
     discounts: r.discounts, isTopUp: r.isTopUp,
     entryMode: r.entryMode,
     needsReview: r.needsReview, reviewReason: r.reviewReason, issues: r.issues,
@@ -227,6 +228,94 @@ export async function recordsOf(receiptId, includeDeleted = false) {
   const rows = await wrap(idx.getAll(receiptId));
   return (includeDeleted ? rows : rows.filter((r) => !r.deletedAt))
     .sort((a, b) => (a.seq || 0) - (b.seq || 0));
+}
+
+/**
+ * 一批收據標記成「退税已到款」（2026-09-09 退税清單）。
+ *
+ * ⚠️ 收據表與品項表**兩邊都要改**，而且要在同一個 transaction 裡。
+ *    `wallet.pendingRefund()` 讀的是 records，確認頁讀的是 receipts——
+ *    只改一邊的話，機場明明核完了，統計頁還一直印著「待退 ¥12,340」。
+ *
+ * ⚠️ 只動每張收據的**第一筆**品項：`taxRefundPending` 只掛在那一筆
+ *    （split.js:255），其餘幾筆本來就是 null，寫進去反而會被重複計算。
+ *
+ * @param items [{ receiptId, actual }] —— actual 是分配回來的實退金額
+ * @param at    退到款的時間
+ */
+export async function markRefunded(items = [], at = new Date().toISOString()) {
+  if (!items.length) return 0;
+  const db = await openDB();
+  const t = db.transaction([STORES.receipts, STORES.records], 'readwrite');
+  const rcp = t.objectStore(STORES.receipts);
+  const rec = t.objectStore(STORES.records);
+  const idx = rec.index('receiptId');
+
+  for (const it of items) {
+    const patch = { refundStatus: 'received', refundActual: it.actual, refundedAt: at };
+
+    await new Promise((resolve, reject) => {
+      const req = rcp.get(it.receiptId);
+      req.onsuccess = () => { if (req.result) rcp.put({ ...req.result, ...patch }); resolve(); };
+      req.onerror = () => reject(req.error);
+    });
+
+    await new Promise((resolve, reject) => {
+      const req = idx.openCursor(it.receiptId);
+      req.onsuccess = (e) => {
+        const cur = e.target.result;
+        if (!cur) { resolve(); return; }
+        // 只有掛著待退金額的那一筆要改
+        if (Number(cur.value.taxRefundPending) > 0) cur.update({ ...cur.value, ...patch });
+        cur.continue();
+      };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    t.oncomplete = () => resolve(items.length);
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error);
+  });
+}
+
+/**
+ * 撤銷退税標記（按錯了要救得回來）。
+ */
+export async function unmarkRefunded(receiptIds = []) {
+  const items = receiptIds.map((receiptId) => ({ receiptId, actual: null }));
+  if (!items.length) return 0;
+  const db = await openDB();
+  const t = db.transaction([STORES.receipts, STORES.records], 'readwrite');
+  const rcp = t.objectStore(STORES.receipts);
+  const rec = t.objectStore(STORES.records);
+  const idx = rec.index('receiptId');
+
+  for (const it of items) {
+    const patch = { refundStatus: 'pending', refundActual: null, refundedAt: null };
+    await new Promise((resolve, reject) => {
+      const req = rcp.get(it.receiptId);
+      req.onsuccess = () => { if (req.result) rcp.put({ ...req.result, ...patch }); resolve(); };
+      req.onerror = () => reject(req.error);
+    });
+    await new Promise((resolve, reject) => {
+      const req = idx.openCursor(it.receiptId);
+      req.onsuccess = (e) => {
+        const cur = e.target.result;
+        if (!cur) { resolve(); return; }
+        if (Number(cur.value.taxRefundPending) > 0) cur.update({ ...cur.value, ...patch });
+        cur.continue();
+      };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    t.oncomplete = () => resolve(items.length);
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error);
+  });
 }
 
 /**

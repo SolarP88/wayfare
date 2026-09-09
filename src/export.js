@@ -42,6 +42,8 @@ export const DETAIL_COLUMNS = [
   ['taxType', '稅制'],
   ['taxRefundPending', '待退稅額'],
   ['refundStatus', '退稅狀態'],
+  ['refundActual', '實際退到'],
+  ['refundedAt', '退款時間'],
   ['isPreTrip', '行前'],
   ['isTopUp', '儲值'],
   ['entryMode', '輸入方式'],
@@ -136,7 +138,11 @@ export function summaryRows(records, settings) {
   if (bp) {
     push('');
     push('預算', round2(bp.budget));
-    push('已用', round2(bp.used));
+    // 「已用」是她自己的份（2026-09-09 分帳之後）。代墊出去的錢會收回來，
+    // 不算她花掉的——但掏出去多少也要有，不然跟銀行對帳對不上。
+    push('已用（我的份）', round2(bp.used));
+    if (bp.advanced > 0) push('其中代墊（會收回來）', round2(bp.advanced));
+    push('實際掏出去', round2(bp.paidOut));
     push('剩餘', round2(bp.left));
     push('使用率', `${(bp.percent * 100).toFixed(1)}%`);
   }
@@ -237,6 +243,7 @@ export function receiptsFromLegacyRecords(records) {
     city: r.city, citySource: r.citySource, coords: r.coords,
     taxType: r.taxType, taxDetail: r.taxDetail,
     taxRefundPending: r.taxRefundPending, refundStatus: r.refundStatus,
+    refundActual: r.refundActual, refundedAt: r.refundedAt,
     discounts: r.discounts, isTopUp: r.isTopUp, entryMode: r.entryMode,
     needsReview: r.needsReview, reviewReason: r.reviewReason, note: r.note,
     status: 'confirmed',

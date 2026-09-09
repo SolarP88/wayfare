@@ -254,5 +254,10 @@ export function toRecords(receipt, lines) {
 
     taxRefundPending: i === 0 ? (receipt.taxRefundPending ?? null) : null,
     refundStatus: i === 0 ? (receipt.refundStatus ?? 'none') : 'none',
+    // 實退金額也只掛第一筆，理由同上（每筆都放會被重複加總）。
+    // ⚠️ 一定要帶下來：不帶的話她在確認頁改一次任何欄位，
+    //    機場核完的退税紀錄就被清成 null 了。
+    refundActual: i === 0 ? (receipt.refundActual ?? null) : null,
+    refundedAt: i === 0 ? (receipt.refundedAt ?? null) : null,
   }));
 }

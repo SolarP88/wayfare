@@ -7,6 +7,7 @@
  */
 
 import { isSpending, localDay, tripDays } from './model.js';
+import { toMyShare } from './settle.js';
 
 /** 現場花費（排除儲值、排除行前）。首頁與每日曲線都用這個。 */
 export function onTripSpending(records) {
@@ -133,15 +134,30 @@ export function topSpends(records, n = 10) {
 /**
  * 預算進度。
  * 預算是**現場花費**的預算——行前的機票住宿不該吃掉當地的每日額度。
+ *
+ * ⚠️ 2026-09-09 改成用「**她的份**」（toMyShare），不是掏出去的錢。她 15:38 拍板。
+ * 為什麼：預算問的是「我這趟花多少」。九人晚餐 ¥45,000 記在她名下但只有 ¥5,000
+ * 是她的，那 ¥40,000 會收回來。算進預算的話她第三天就見底然後開始不敢花錢。
+ *
+ * 改之前首頁會出現兩個不一樣的「剩餘」（這張磚 155%、今天還能花那張 S$2,882），
+ * 因為 dailyAllowance 已經是用她的份算的。兩張現在同一個基準。
+ *
+ * ⚠️ 沒有 shares 的紀錄照樣全額算，所以**還沒用分帳之前，數字跟以前完全一樣**。
+ *
+ * `paidOut` 另外給掏出去的錢——現金錢包、匯出報表要對帳時看的是那個。
  */
-export function budgetProgress(records, settings) {
+export function budgetProgress(records, settings, opts = {}) {
   const budget = settings.totalBudget || 0;
   if (budget <= 0) return null;
-  const used = tripTotal(records);
+  const mine = toMyShare(records, { meId: opts.meId || 'p1', validIds: opts.validIds || null });
+  const used = tripTotal(mine);
+  const paidOut = tripTotal(records);
   const days = tripDays(settings);
   return {
     budget,
     used,
+    paidOut,
+    advanced: paidOut - used,      // 代墊出去、之後會收回來的
     left: budget - used,
     percent: used / budget,
     perDay: days ? budget / days : null,
@@ -214,5 +230,72 @@ export function healthCheck(records, settings, opts = {}) {
     noHomeAmount: byReceipt(records.filter((r) => r.amountHome == null)),
     duplicates: findDuplicates(records),
     missingRates: opts.missingRates ?? !(settings.cashRate > 0),
+  };
+}
+
+/**
+ * 今天還能花多少（2026-09-09，她挑的 P1 之一）。
+ *
+ * 為什麼要有：首頁本來只有一條「用了 62%」的總進度。
+ * 站在藥妝店裡看到那個數字，還是不知道今天這件外套能不能買。
+ * 旅行中真正會一直看的是**今天的額度**。
+ *
+ * 算法刻意選了「**剩餘預算 ÷ 剩餘天數**」而不是「總預算 ÷ 總天數」：
+ * 前三天省下來的錢，第四天就可以花；前三天超支，後面每天自動收緊。
+ * 固定額度那種算法，超支一次之後整趟都在跟一個永遠追不上的數字賭氣。
+ *
+ * ⚠️ 用的是「**我的份**」不是掏出去的錢（toMyShare）。
+ *    九人晚餐 ¥45,000 記在她名下但只有 ¥5,000 是她的，
+ *    直接拿掏出去的錢扣預算，第三天就見底然後她開始不敢花錢。
+ *
+ * @returns null 表示不該顯示（沒設預算或沒設行程）
+ */
+export function dailyAllowance(records, settings, opts = {}) {
+  const budget = settings.totalBudget || 0;
+  const total = tripDays(settings);
+  if (budget <= 0 || !total) return null;
+
+  const today = localDay(opts.today) || localDay(new Date().toISOString());
+  const start = localDay(settings.tripStart);
+  const end = localDay(settings.tripEnd);
+  if (!today || !start || !end) return null;
+
+  const mine = toMyShare(records, { meId: opts.meId || 'p1', validIds: opts.validIds || null });
+  const used = tripTotal(mine);
+  const left = budget - used;
+
+  const DAY = 86400000;
+  let phase = 'during';
+  if (Date.parse(today) < Date.parse(start)) phase = 'before';
+  else if (Date.parse(today) > Date.parse(end)) phase = 'after';
+
+  // 剩餘天數**含今天**。不含的話最後一天會變成「÷ 0」或「今天不能花」。
+  const daysLeft = phase === 'before' ? total
+    : phase === 'after' ? 0
+    : Math.round((Date.parse(end) - Date.parse(today)) / DAY) + 1;
+
+  // 已經超支就沒有「每天還能花」可言，給 0 而不是負數——
+  // 負的每日額度沒有任何操作意義，只會讓人看不懂。
+  const perDay = daysLeft > 0 ? Math.max(0, left / daysLeft) : null;
+  const spentToday = phase === 'during' ? todayTotal(mine, today) : 0;
+  const leftToday = perDay == null ? null : perDay - spentToday;
+
+  // 換成當地幣。她人在日本，看日圓才有用。
+  // 現金匯率優先（多數當地消費是現金 / Suica），沒設才退回刷卡匯率。
+  const rate = settings.cashRate > 0 ? settings.cashRate
+             : settings.cardRate > 0 ? settings.cardRate : null;
+  const toLocal = (v) => (rate == null || v == null ? null : v * rate);
+
+  return {
+    phase,
+    budget, used, left,
+    daysTotal: total, daysLeft,
+    perDay, spentToday, leftToday,
+    perDayLocal: toLocal(perDay),
+    spentTodayLocal: toLocal(spentToday),
+    leftTodayLocal: toLocal(leftToday),
+    over: leftToday != null && leftToday < 0,
+    overBudget: left < 0,
+    rate,
   };
 }

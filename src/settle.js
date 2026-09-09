@@ -269,3 +269,43 @@ export function myShareTotals(records = [], { meId = 'p1', validIds = null } = {
   for (const c of Object.keys(out)) out[c] = fromMinor(out[c], decimalsOf(c));
   return out;
 }
+
+/**
+ * 把每一筆換成「**只有我那一份**」的樣子，其他欄位原樣保留。
+ *
+ * 為什麼需要這個投影：預算問的是「我這趟花了多少」，
+ * 但 records 裡存的是**掏出去的錢**。九人晚餐 ¥45,000 記在她名下，
+ * 直接拿去扣預算，等於把朋友的八份也算成她花掉了——
+ * 預算會在第三天就見底，然後她開始不敢花錢。
+ *
+ * 完全不關她的事的那幾筆（她只是代墊）會被濾掉，不是留一筆 0。
+ *
+ * `amountHome` 按同一個比例縮——本位幣本來就是換算值，
+ * 不需要（也不該）再走一次分帳的整數餘數規則。
+ */
+export function toMyShare(records = [], { meId = 'p1', validIds = null } = {}) {
+  const out = [];
+  for (const r of records) {
+    const amount = Number(r.amount);
+    if (!Number.isFinite(amount) || amount === 0) { out.push(r); continue; }
+
+    const ids = sharesOf(r, validIds);
+    // 沒有分帳（就是付款人自己）→ 原樣保留，不要動到任何舊資料的行為
+    if (ids.length <= 1) { out.push(r); continue; }
+    if (!ids.includes(meId)) continue;              // 純代墊，不是我的花費
+
+    const currency = r.currency || 'JPY';
+    const d = decimalsOf(currency);
+    const payerIdx = ids.indexOf(r.payer);
+    const parts = shareAmountsMinor(toMinor(amount, d), ids.length, payerIdx >= 0 ? payerIdx : 0);
+    const myAmount = fromMinor(parts[ids.indexOf(meId)], d);
+
+    out.push({
+      ...r,
+      amount: myAmount,
+      amountHome: r.amountHome == null ? r.amountHome : r.amountHome * (myAmount / amount),
+      myShareOf: amount,          // 原本整筆多少，畫面上想講「你墊了 X」時用得到
+    });
+  }
+  return out;
+}

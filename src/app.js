@@ -15,10 +15,11 @@ import {
   todayTotal, tripTotal, preTripTotal, byCategory, byPayment, byCity, byPayer,
   dailySeries, budgetProgress, topSpends, healthCheck, onTripSpending,
   tripTotalLocal, todayTotalLocal, otherCurrencyTotal,
-  byCategoryLocal, byPaymentLocal, byPayerLocal, byCityLocal,
+  byCategoryLocal, byPaymentLocal, byPayerLocal, byCityLocal, dailyAllowance,
 } from './stats.js';
 import { buildLines, toRecords, isBalanced, decimalsOf } from './split.js';
 import { settleUp, myShareTotals } from './settle.js';
+import { refundRows, refundSummary, allocateActual, feeNote, REFUND_STATUS } from './refund.js';
 import { priceDiscountTotal } from './country-rules/japan.js';
 import * as db from './db.js';
 import { createQueue, STATUS } from './queue.js';
@@ -425,7 +426,11 @@ function renderHome() {
     : dn ? `共 ${td} 天 · 還有 ${td - dn} 天`
     : '不在行程期間內';
 
-  const bp = budgetProgress(state.records, s);
+  renderAllowance();
+
+  const bp = budgetProgress(state.records, s, {
+    meId: meId(), validIds: allPeople().length ? allPeople().map((p) => p.id) : null,
+  });
   if (!bp) {
     $('budgetPct').textContent = '未設預算';
     $('budgetBar').firstElementChild.style.width = '0';
@@ -439,7 +444,13 @@ function renderHome() {
   }
 
   const pre = preTripTotal(state.records);
-  $('preTrip').textContent = pre ? `另有行前 ${homeM(pre)}` : '';
+  // 「旅程累計」印的是**掏出去的錢**，跟預算進度（她的份）基準不同——
+  // 有代墊時一定要講一聲，不然兩個數字對不起來她會以為算錯了。
+  const advanced = bp?.advanced || 0;
+  $('preTrip').textContent = [
+    pre ? `另有行前 ${homeM(pre)}` : '',
+    advanced > 0 ? `其中 ${homeM(advanced)} 是代墊` : '',
+  ].filter(Boolean).join('　');
 
   const today = onTripSpending(state.records)
     .filter((r) => localDay(r.date) === todayLocal())
@@ -1329,6 +1340,7 @@ function renderStats() {
     bars(byPayerLocal(R, cur).map((x) => ({ ...x, key: names.get(x.key) || x.key })), f));
 
   $('refundTotal').textContent = local(pendingRefund(R));
+  renderRefundList(R);
 
   // 排行。topSpends 只回摘要，類別／支付方式回原始紀錄撈（不改 stats.js 的介面）
   const byId = new Map(R.map((r) => [r.id, r]));
@@ -2082,6 +2094,230 @@ function closeConfirm() {
 }
 
 const lineSum = (lines) => lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+
+/**
+ * 「今天還能花多少」（2026-09-09）。
+ *
+ * 首頁本來只有一條「用了 62%」的總進度。站在藥妝店裡看那個數字，
+ * 還是不知道這件外套能不能買——所以這裡直接回答那個問題。
+ *
+ * ⚠️ 主字用**當地幣**，本位幣退到小字。她人在日本看的價標是日圓，
+ *    腦子裡不該再做一次除法。沒設匯率才退回本位幣。
+ */
+function renderAllowance() {
+  const card = $('allowanceCard');
+  const a = dailyAllowance(state.records, state.settings, {
+    today: todayLocal(),
+    meId: meId(),
+    validIds: allPeople().length ? allPeople().map((p) => p.id) : null,
+  });
+
+  // 沒設預算或沒設行程 → 整張卡收起來，不要留一個「—」在首頁佔位子
+  if (!a || a.phase === 'after') { card.hidden = true; return; }
+  card.hidden = false;
+
+  const bar = $('allowanceBar');
+  const fill = bar.firstElementChild;
+  const cur = state.settings.localCurrency;
+  // 有匯率就講日圓（她看得到的價標），沒有就退回本位幣
+  const show = (localV, homeV) => (a.rate != null && localV != null ? amt(localV, cur) : homeM(homeV));
+
+  if (a.phase === 'before') {
+    $('allowanceLabel').textContent = '出發後每天可以花';
+    $('allowanceDays').textContent = `共 ${a.daysTotal} 天`;
+    $('allowanceMain').textContent = show(a.perDayLocal, a.perDay);
+    $('allowanceMain').className = 'big num';
+    fill.style.width = '0';
+    bar.classList.remove('over');
+    $('allowanceSub').textContent = a.rate != null
+      ? `總預算 ${homeM(a.budget)} ÷ ${a.daysTotal} 天`
+      : `總預算 ${homeM(a.budget)} ÷ ${a.daysTotal} 天（匯率沒設，只能顯示 ${state.settings.homeCurrency}）`;
+    return;
+  }
+
+  // ── 行程中 ────────────────────────────────────────────────
+  $('allowanceDays').textContent = `剩 ${a.daysLeft} 天`;
+
+  if (a.overBudget) {
+    // 預算整個爆了。這時候講「今天還能花」沒有意義，直接講實話。
+    $('allowanceLabel').textContent = '預算已經用完';
+    $('allowanceMain').textContent = `超出 ${homeM(-a.left)}`;
+    $('allowanceMain').className = 'big num bad';
+    fill.style.width = '100%';
+    bar.classList.add('over');
+    $('allowanceSub').textContent = `已用 ${homeM(a.used)} / 預算 ${homeM(a.budget)}`;
+    return;
+  }
+
+  if (a.over) {
+    // 今天超出額度，但整體預算還在。講「今天超出多少」比印一個負數好懂。
+    $('allowanceLabel').textContent = '今天超出額度';
+    $('allowanceMain').textContent = show(-a.leftTodayLocal, -a.leftToday);
+    $('allowanceMain').className = 'big num warn';
+    fill.style.width = '100%';
+    bar.classList.add('over');
+  } else {
+    $('allowanceLabel').textContent = '今天還能花';
+    $('allowanceMain').textContent = show(a.leftTodayLocal, a.leftToday);
+    $('allowanceMain').className = 'big num';
+    const pct = a.perDay > 0 ? Math.min(100, (a.spentToday / a.perDay) * 100) : 0;
+    fill.style.width = `${pct}%`;
+    bar.classList.remove('over');
+  }
+
+  // 小字把算式攤開來——她要看得出這個數字是怎麼來的，不然不會信它。
+  const spent = show(a.spentTodayLocal, a.spentToday);
+  const perDay = show(a.perDayLocal, a.perDay);
+  $('allowanceSub').textContent =
+    `今天已花 ${spent} · 今日額度 ${perDay}（剩餘 ${homeM(a.left)} ÷ ${a.daysLeft} 天）`;
+}
+
+/**
+ * 退税清單（2026-09-09）—— 哪幾張要退、機場一次核、實際退到多少。
+ *
+ * 為什麼不只是一個總額：站在機場退税櫃檯，「待退 ¥12,340」幫不上任何忙。
+ * 櫃檯要的是**一張一張的收據**，她需要知道該交哪幾張、交完了沒、最後真的退了多少。
+ *
+ * ⚠️ 收據交出去就拿不回來、離境後也補不了 —— 所以這份清單少列一張，
+ *    那張的錢就真的沒了。`test_refund.mjs` 在盯這件事。
+ */
+function renderRefundList(records) {
+  const box = $('refundList');
+  box.textContent = '';
+  const rows = refundRows(records);
+  if (!rows.length) {
+    box.append(el('div', { className: 'sub', textContent:
+      '目前沒有要退税的收據。辨識到免税收據時會自動出現在這裡。' }));
+    return;
+  }
+
+  const summary = refundSummary(records);
+  const pending = rows.filter((r) => r.status !== REFUND_STATUS.received);
+  const received = rows.filter((r) => r.status === REFUND_STATUS.received);
+
+  // ── 還沒退的：一張一列，前面有勾選框 ────────────────────────
+  if (pending.length) {
+    box.append(el('div', { className: 'sect', style: 'margin:6px 2px 8px',
+      textContent: `還沒退（${pending.length} 張）` }));
+
+    // 預設全勾：機場多半是整疊一起交，要她一張一張勾比較累
+    const checked = new Set(pending.map((r) => r.receiptId));
+
+    const list = el('div');
+    for (const r of pending) {
+      const row = el('label', {
+        style: 'display:flex;gap:12px;align-items:center;min-height:var(--tap);'
+             + 'padding:6px 0;border-bottom:1px solid var(--line);cursor:pointer',
+      });
+      // 24px 的勾選框：戴手套要點得到（§14）
+      const cb = el('input', { type: 'checkbox', checked: true,
+        style: 'width:24px;height:24px;flex:none' });
+      cb.onchange = () => {
+        if (cb.checked) checked.add(r.receiptId); else checked.delete(r.receiptId);
+        updateBtn();
+      };
+      const mid = el('div', { style: 'flex:1;min-width:0' }, [
+        el('div', { textContent: r.storeName,
+          style: 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis' }),
+        el('div', { className: 'sub', textContent: String(r.date || '').slice(0, 10) }),
+      ]);
+      const amtEl = el('div', { className: 'num', style: 'font-weight:650',
+        textContent: amt(r.expected, r.currency) });
+      row.append(cb, mid, amtEl);
+      list.append(row);
+    }
+    box.append(list);
+
+    const btn = el('button', { className: 'btn wide primary', style: 'margin-top:12px' });
+    const updateBtn = () => {
+      const sel = pending.filter((r) => checked.has(r.receiptId));
+      const byCur = {};
+      for (const r of sel) byCur[r.currency] = (byCur[r.currency] || 0) + r.expected;
+      const label = Object.entries(byCur).map(([c, v]) => amt(v, c)).join(' + ');
+      btn.textContent = sel.length ? `這 ${sel.length} 張退到款了（應退 ${label}）` : '選一張以上';
+      btn.disabled = !sel.length;
+    };
+    updateBtn();
+
+    btn.onclick = () => {
+      const sel = pending.filter((r) => checked.has(r.receiptId));
+      // 幣別不同不可以混在一起算（跟 settle.js 鐵律 2 同一個理由）
+      const currencies = [...new Set(sel.map((r) => r.currency))];
+      if (currencies.length > 1) {
+        banner('warn', `選到 ${currencies.join('、')} 兩種幣別，請分開結。`);
+        return;
+      }
+      const currency = currencies[0];
+      const expected = sel.reduce((s, r) => s + r.expected, 0);
+      const input = el('input', { type: 'number', inputMode: 'decimal', value: expected,
+        style: 'width:100%' });
+
+      dialog('實際退到多少？', el('div', {}, [
+        el('div', { className: 'sub', textContent:
+          `${sel.length} 張，應退 ${amt(expected, currency)}。`
+          + '被扣手續費就填實際到手的數字——差額會記下來。' }),
+        el('div', { className: 'field', style: 'margin-top:10px' }, [
+          el('label', { textContent: `實際金額（${currency}）` }), input,
+        ]),
+      ]), [
+        ['確定', async () => {
+          const v = Number(input.value);
+          if (!Number.isFinite(v) || v < 0) return;
+          $('dlg').close();
+          // 一次退一包錢，但報表是一張一列 —— 按應退比例分回去，Σ 保證等於實退
+          const alloc = allocateActual(sel, v, currency);
+          await db.markRefunded(alloc.map((r) => ({ receiptId: r.receiptId, actual: r.actual })));
+          await reload();
+          render();
+          const note = feeNote(expected, v, currency);
+          banner(note && note.kind === 'short' ? 'warn' : 'info',
+            note ? `已記錄。應退 ${amt(expected, currency)}，實退 ${amt(v, currency)}，`
+                 + `${note.kind === 'short' ? '少了' : '多了'} ${amt(note.amount, currency)}`
+                 + `（${note.percent.toFixed(1)}%）`
+                 : `已記錄，${amt(v, currency)} 全額退到。`);
+        }, 'primary'],
+        ['取消', () => $('dlg').close()],
+      ]);
+    };
+    box.append(btn);
+  }
+
+  // ── 已經退到的 ──────────────────────────────────────────────
+  if (received.length) {
+    box.append(el('div', { className: 'sect', style: 'margin:16px 2px 8px',
+      textContent: `已退到款（${received.length} 張）` }));
+
+    for (const [currency, g] of Object.entries(summary)) {
+      if (!g.receivedCount) continue;
+      const note = feeNote(g.expectedOfReceived, g.actualReceived, currency);
+      box.append(el('div', { className: 'sub', style: 'margin-bottom:8px', textContent:
+        `應退 ${amt(g.expectedOfReceived, currency)} → 實退 ${amt(g.actualReceived, currency)}`
+        + (note ? `（${note.kind === 'short' ? '少' : '多'} ${amt(note.amount, currency)}）` : '') }));
+    }
+
+    for (const r of received) {
+      const row = el('div', { className: 'row',
+        style: 'padding:6px 0;border-bottom:1px solid var(--line)' });
+      row.append(el('div', { style: 'flex:1;min-width:0' }, [
+        el('div', { textContent: r.storeName,
+          style: 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis' }),
+        el('div', { className: 'sub', textContent:
+          r.actual != null && r.actual !== r.expected
+            ? `應退 ${amt(r.expected, r.currency)} → 實退 ${amt(r.actual, r.currency)}`
+            : `${amt(r.expected, r.currency)} 全額` }),
+      ]));
+      const undo = el('button', { className: 'btn danger',
+        style: 'min-height:44px;padding:0 12px', textContent: '撤銷' });
+      undo.onclick = async () => {
+        await db.unmarkRefunded([r.receiptId]);
+        await reload();
+        render();
+      };
+      row.append(undo);
+      box.append(row);
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // 分帳結算頁（2026-09-09）
