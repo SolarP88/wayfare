@@ -920,7 +920,143 @@ function wireScan() {
   };
   $('btnRetryAll').onclick = () => queue.retryAllFailed();
 
+  // 長收據（2026-09-09）。用另一個 input：這個不加 multiple，
+  // 因為相機一次只拍一張，而「一次選很多張」在這個動線裡意思是不一樣的。
+  $('btnShootLong').onclick = longStart;
+  $('btnLongMore').onclick = longStart;
+  $('shotLong').onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (file) await longIntake(file);
+  };
+  $('btnLongDone').onclick = longSubmit;
+  $('btnLongCancel').onclick = () => {
+    dialog('取消這份長收據？',
+      el('div', { className: 'sub', textContent:
+        `已經拍的 ${longShots?.shots.length || 0} 張會被丟掉，沒有存進手機。` }), [
+        ['丟掉', () => { $('dlg').close(); longReset(); renderLongBox(); }, 'danger'],
+        ['算了', () => $('dlg').close()],
+      ]);
+  };
+
   $('btnQuickSave').onclick = quickSave;
+}
+
+// ---------------------------------------------------------------------------
+// 長收據：一張收據分多次拍（2026-09-09）
+//
+// 為什麼要有：超市的長收據一張拍不完，她拍兩張就變成**兩筆獨立的帳**，
+// 還要手動刪掉一筆再自己加總。
+//
+// 為什麼選「拍照當下就決定」而不是「事後合併兩筆」：
+// 兩張分開辨識完再拼，小計和合計很可能對不上（品項重複、稅額算兩次）；
+// 一起送給模型，它看得到完整上下文，讀出來就是一張正確的收據。
+// 而且長收據**拍的當下就知道它拍不完**，這時候按一下比事後回頭找兩筆容易。
+//
+// ⚠️ 暫存區只活在記憶體裡（不進 IndexedDB）。理由：這是一個「還沒完成」的動作，
+//    半途關掉 App 不該留下一堆孤兒照片。代價是切出去再回來會沒了——
+//    所以取消鈕明說「照片不留」，不要讓她以為存起來了。
+// ---------------------------------------------------------------------------
+
+/** 組合中的長收據。null = 沒有在組合。 */
+let longShots = null;
+
+function longReset() {
+  // objectURL 要收掉，不然每拍一張就漏一個
+  for (const s of longShots?.shots || []) URL.revokeObjectURL(s.url);
+  longShots = null;
+}
+
+/** 開始一份長收據（或繼續加一張）。 */
+function longStart() {
+  if (!longShots) longShots = { shots: [], coords: null, capturedAt: localStamp() };
+  $('shotLong').click();
+}
+
+/** 收一張進暫存區。 */
+async function longIntake(file) {
+  let shot;
+  try {
+    shot = await compress(file);
+  } catch (err) {
+    banner('bad', `照片處理失敗：${err.message}`);
+    return;
+  }
+  if (!longShots) longShots = { shots: [], coords: null, capturedAt: localStamp() };
+  // 座標只抓第一張——同一張收據不會跨城市，而且每張都抓很耗電（§16 第 12 條）
+  if (!longShots.coords) longShots.coords = await getCoords();
+  longShots.shots.push({ blob: shot.blob, url: URL.createObjectURL(shot.blob) });
+  renderLongBox();
+}
+
+/** 送出：所有照片當成同一張收據，進辨識佇列。 */
+async function longSubmit() {
+  if (!longShots || !longShots.shots.length) return;
+  const shots = longShots.shots;
+  const id = crypto.randomUUID();
+
+  // 照片全部掛在同一個 receiptId 底下——確認頁與備份本來就是照 receiptId 撈
+  for (const s of shots) await db.putPhoto(id, s.blob);
+
+  const images = [];
+  for (const s of shots) images.push({ base64: await toBase64(s.blob), mimeType: 'image/jpeg' });
+
+  queue.add({
+    id,
+    images,
+    mimeType: 'image/jpeg',
+    coords: longShots.coords,
+    capturedAt: longShots.capturedAt,
+    longShots: shots.length,          // 確認頁想提一句「這張由 N 張照片組成」時用得到
+  });
+
+  const n = shots.length;
+  longReset();
+  renderLongBox();
+  renderScan();
+  banner('info', `${n} 張照片當成一張收據送出去辨識了。`);
+}
+
+/** 畫暫存區。沒有在組合時整張卡收起來。 */
+function renderLongBox() {
+  const box = $('longBox');
+  if (!longShots || !longShots.shots.length) { box.hidden = true; return; }
+  box.hidden = false;
+
+  const n = longShots.shots.length;
+  $('longCount').textContent = `${n} 張`;
+  $('longTitle').textContent = n === 1 ? '長收據組合中（還只有 1 張）' : '長收據組合中';
+
+  const thumbs = $('longThumbs');
+  thumbs.textContent = '';
+  longShots.shots.forEach((s, i) => {
+    const wrap = el('div', { style: 'position:relative;flex:none' });
+    wrap.append(el('img', { src: s.url, alt: `第 ${i + 1} 張`,
+      style: 'width:72px;height:96px;object-fit:cover;border-radius:10px;border:1px solid var(--line)' }));
+    wrap.append(el('div', {
+      textContent: String(i + 1),
+      style: 'position:absolute;left:4px;top:4px;background:rgba(0,0,0,.6);color:#fff;'
+           + 'border-radius:6px;padding:0 6px;font-size:12px;font-weight:700',
+    }));
+    // 拍歪了要刪得掉。刪的是暫存區，不是已存的資料，所以不用走回收桶那套。
+    const rm = el('button', {
+      textContent: '✕', title: '刪掉這張',
+      style: 'position:absolute;right:2px;top:2px;width:26px;height:26px;border-radius:50%;'
+           + 'border:none;background:rgba(0,0,0,.6);color:#fff;cursor:pointer;line-height:1',
+    });
+    rm.onclick = () => {
+      URL.revokeObjectURL(s.url);
+      longShots.shots.splice(i, 1);
+      if (!longShots.shots.length) longReset();
+      renderLongBox();
+    };
+    wrap.append(rm);
+    thumbs.append(wrap);
+  });
+
+  // 只有一張時送出去沒有意義（那就是普通收據），但不擋——她可能真的只需要一張
+  $('btnLongDone').textContent = n === 1
+    ? '只有這一張，送辨識' : `這 ${n} 張拍完了，送辨識`;
 }
 
 /** 拍完立刻回到相機（§3）——所以這裡只做「存起來 + 丟進佇列」，不等辨識。 */
@@ -1010,6 +1146,8 @@ async function onRecognized(item) {
 
 function renderScan() {
   renderDrafts();
+  // 切去別的分頁再回來，組合中的長收據要還在（暫存區在記憶體，沒被清掉）
+  renderLongBox();
 
   // 拍照與快速記帳都會算在這個人頭上，所以放在拍照按鈕旁邊看得到
   $('scanPayerBox').hidden = !multiPayer();

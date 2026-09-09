@@ -84,7 +84,9 @@ export function createQueue({ getApiKey, getSettings, onUpdate, save }) {
       const r = await recognizeReceipt({
         apiKey: getApiKey(),
         prompt: RECEIPT_PROMPT,
+        // 長收據會有多張；單張時 images 是 undefined，走 imageBase64 那條舊路
         imageBase64: next.imageBase64,
+        images: next.images,
         mimeType: next.mimeType || 'image/jpeg',
         coords: next.coords,
       });

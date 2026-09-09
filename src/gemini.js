@@ -90,14 +90,45 @@ function extractJson(text) {
   return JSON.parse(raw.slice(start, end + 1));
 }
 
-async function callOnce({ apiKey, model, prompt, imageBase64, mimeType, coords }) {
+/**
+ * 把呼叫端給的圖收斂成一個陣列。
+ *
+ * 舊呼叫端給的是單張 `imageBase64`，新的（長收據）給 `images: [{base64, mimeType}]`。
+ * 兩種都要吃得下——不然改一個地方就要同時改佇列、重試、備份還原三處。
+ */
+function imageParts({ images, imageBase64, mimeType }) {
+  if (Array.isArray(images) && images.length) {
+    return images
+      .filter((im) => im && im.base64)
+      .map((im) => ({ inlineData: { mimeType: im.mimeType || 'image/jpeg', data: im.base64 } }));
+  }
+  return imageBase64
+    ? [{ inlineData: { mimeType: mimeType || 'image/jpeg', data: imageBase64 } }]
+    : [];
+}
+
+async function callOnce({ apiKey, model, prompt, imageBase64, images, mimeType, coords }) {
+  const imgs = imageParts({ images, imageBase64, mimeType });
   const parts = [{ text: prompt }];
   if (coords) {
     parts.push({
       text: `\n\n拍照當下的 GPS 座標：緯度 ${coords.lat}, 經度 ${coords.lng}。用這個判斷城市。`,
     });
   }
-  parts.push({ inlineData: { mimeType: mimeType || 'image/jpeg', data: imageBase64 } });
+  /* 長收據（2026-09-09）：超市的長收據一張拍不完，她會分成兩三張拍。
+     不講清楚的話模型會把它們當成**幾張不同的收據**，於是品項重複、合計對不上。
+     所以多張時明講「這是同一張，照順序接起來」。 */
+  if (imgs.length > 1) {
+    parts.push({
+      text: `\n\n⚠️ 下面 ${imgs.length} 張照片是**同一張收據**分次拍的，`
+          + '由上而下接續（可能有重疊）。請把它們當成一張收據來讀：\n'
+          + '· 品項只列一次——重疊的部分不要重複計算\n'
+          + '· 合計、小計、稅額以印出來的那個為準，不要自己把幾張加起來\n'
+          + '· 如果接不起來（明顯是不同店或不同時間），把 needsReview 設成 true 並說明',
+    });
+  }
+
+  parts.push(...imgs);
 
   const send = async () => {
     await takeSlot();
@@ -161,13 +192,13 @@ async function callOnce({ apiKey, model, prompt, imageBase64, mimeType, coords }
  * @returns {{ok, data, model, escalated, error}}
  */
 export async function recognizeReceipt({
-  apiKey, prompt, imageBase64, mimeType, coords, allowEscalate = true,
+  apiKey, prompt, imageBase64, images, mimeType, coords, allowEscalate = true,
 }) {
   const attempts = [];
   let first;
 
   try {
-    first = await callOnce({ apiKey, model: MODELS.primary, prompt, imageBase64, mimeType, coords });
+    first = await callOnce({ apiKey, model: MODELS.primary, prompt, imageBase64, images, mimeType, coords });
     attempts.push({ model: MODELS.primary, ok: true, usage: first.usage });
   } catch (e) {
     attempts.push({ model: MODELS.primary, ok: false, error: e.message });
@@ -188,7 +219,7 @@ export async function recognizeReceipt({
   // 升級一次，就一次。（§5 第 3 條：兩者都失敗 → 待手動輸入，不重試燒額度）
   try {
     const second = await callOnce({
-      apiKey, model: MODELS.fallback, prompt, imageBase64, mimeType, coords,
+      apiKey, model: MODELS.fallback, prompt, imageBase64, images, mimeType, coords,
     });
     attempts.push({ model: MODELS.fallback, ok: true, usage: second.usage });
     return { ok: true, data: second.data, model: MODELS.fallback, escalated: true, attempts };

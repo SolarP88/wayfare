@@ -440,10 +440,28 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       <div class="chips" id="scanPayer"></div>
     </div>
 
+    <!-- 長收據組合中（2026-09-09）。只有在她按了「長收據」之後才出現。 -->
+    <div class="card" id="longBox" hidden style="border-color:var(--accent)">
+      <div class="row">
+        <strong id="longTitle">長收據組合中</strong>
+        <span class="sub" id="longCount"></span>
+      </div>
+      <div class="sub" style="margin:4px 0 12px">
+        這幾張會當成<strong>同一張收據</strong>送辨識。拍的時候讓上下有一點重疊。
+      </div>
+      <div id="longThumbs" style="display:flex;gap:8px;overflow-x:auto;margin-bottom:12px"></div>
+      <button class="btn wide" id="btnLongMore" style="margin-bottom:8px">＋ 再拍一張</button>
+      <button class="btn wide primary" id="btnLongDone" style="margin-bottom:8px">這張拍完了，送辨識</button>
+      <button class="btn wide danger" id="btnLongCancel">取消（照片不留）</button>
+    </div>
+
     <!-- 拍照按鈕放最下面：單手操作，拇指區（§14） -->
     <input type="file" id="shot" accept="image/*" capture="environment" multiple hidden>
+    <input type="file" id="shotLong" accept="image/*" capture="environment" hidden>
     <button class="btn primary wide" id="btnShoot" style="min-height:64px;font-size:18px">📷 拍收據（可連拍）</button>
     <div class="sub" style="text-align:center;margin-top:8px">拍完立刻回到相機，辨識在背景跑</div>
+    <button class="btn wide" id="btnShootLong" style="min-height:56px;margin-top:10px">📄 長收據（一張分多次拍）</button>
+    <div class="sub" style="text-align:center;margin-top:8px">超市那種一張拍不完的，用這個</div>
   </section>
 
     <!-- 確認收據內容（拍完先落地成草稿，她按確認才進統計） ------------------ -->
