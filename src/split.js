@@ -228,6 +228,9 @@ export function toRecords(receipt, lines) {
     amount: l.amount,
     category: l.category || receipt.category,
     note: l.note || '',
+    // 這一筆是分給誰的（2026-09-09）。沒指定就跟著整張收據；
+    // 整張也沒指定就是 null = 全部算付款人自己的（舊資料的行為，不可以改）。
+    shares: l.shares || receipt.shares || null,
 
     // 從收據繼承的（列表、統計、錢包都靠這些）
     date: receipt.date,

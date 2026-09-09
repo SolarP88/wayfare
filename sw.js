@@ -21,9 +21,18 @@
 
 /* deploy.sh 會把這行換成當次檔案內容的雜湊。
    換一個版本號 = 換一個 cache 名字 = 手機下次連上網就會抓到新版。
-   本機直接開檔時就維持 97cdd47e7ac2，不影響功能。 */
-const VERSION = '97cdd47e7ac2';
+   本機直接開檔時就維持 52aead591b18，不影響功能。 */
+const VERSION = '52aead591b18';
 const CACHE = `wayfare-${VERSION}`;
+
+/* 版本號還是佔位符 = 這份沒有經過 deploy.sh = **本機開發中**。
+   2026-09-09 踩到：本機改了 db.js，瀏覽器卻一直跑舊的——因為 sw.js 一個字沒變，
+   瀏覽器認定 SW 沒更新，於是快取裡的舊檔案永遠不會被換掉。
+   （這正是版本戳要防的事，只是本機沒有版本戳可用。）
+
+   所以開發時反過來走「網路優先」：抓得到就用新的，抓不到才退回快取。
+   線上（版本戳蓋過）維持快取優先——那才是「沒訊號也打得開」需要的行為。 */
+const DEV = VERSION === '__' + 'BUILD__';
 
 /* 匯出 Excel 用的。CDN 來的，但**一定要快取** ——
    不然人在飛機上想匯出，SheetJS 抓不到，匯出鈕整個掛掉。 */
@@ -48,6 +57,7 @@ const SHELL = [
   'src/gemini.js',
   'src/model.js',
   'src/queue.js',
+  'src/settle.js',
   'src/split.js',
   'src/stats.js',
   'src/wallet.js',
@@ -59,13 +69,21 @@ self.addEventListener('install', (e) => {
     const cache = await caches.open(CACHE);
 
     /* 同網域這些是 App 的命脈，少一個就別裝了 —— 寧可維持舊版可以離線，
-       也不要裝一個「開得起來但缺一個模組」的半套版本。 */
-    await cache.addAll(SHELL);
+       也不要裝一個「開得起來但缺一個模組」的半套版本。
+
+       ⛔ `cache: 'reload'` 不可以拿掉。
+       `cache.addAll(SHELL)` 預設會**先問瀏覽器的 HTTP 快取**——於是「安裝新版」
+       有機會把**舊檔案**存進新快取。實際後果：我修好一個 bug、她點了「有新版本」，
+       新快取裡裝的還是舊程式，而且從此固定住，怎麼重開都一樣。
+       2026-09-09 本機實測就是這樣：sw.js 換了、快取名也換了，
+       但 fetch('src/db.js') 拿回來的還是上一版。
+       'reload' 強迫每一個檔都真的去網路拿。 */
+    await cache.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })));
 
     /* SheetJS 是跨網域。CDN 偶爾會抽風，但那不該讓整個更新失敗
        （匯出離線掛掉 << App 整個打不開）。所以單獨試，失敗就算了。 */
     try {
-      await cache.add(new Request(XLSX_CDN, { mode: 'cors' }));
+      await cache.add(new Request(XLSX_CDN, { mode: 'cors', cache: 'reload' }));
     } catch (err) {
       console.warn('[sw] SheetJS 沒快取到，離線匯出會不能用：', err);
     }
@@ -110,6 +128,9 @@ self.addEventListener('fetch', (e) => {
        離線時網路一定失敗，所以先給快取裡的 index.html —— 這一行就是
        「沒訊號點開圖示不再是白畫面」的關鍵。 */
     if (req.mode === 'navigate') {
+      if (DEV) {
+        try { return await fetchAndCache(req); } catch { /* 沒網路就往下走快取 */ }
+      }
       const hit = await caches.match('index.html', { cacheName: CACHE })
                || await caches.match('./', { cacheName: CACHE });
       if (hit) {
@@ -121,7 +142,10 @@ self.addEventListener('fetch', (e) => {
       return fetch(req);
     }
 
-    /* 其餘同網域資源（模組、manifest）與 SheetJS：快取優先。 */
+    /* 其餘同網域資源（模組、manifest）與 SheetJS：快取優先（開發時網路優先，見上面 DEV）。 */
+    if (DEV) {
+      try { return await fetchAndCache(req); } catch { /* 沒網路就往下走快取 */ }
+    }
     const hit = await caches.match(req, { cacheName: CACHE });
     if (hit) return hit;
 

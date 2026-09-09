@@ -45,6 +45,11 @@ export function defaultSettings() {
       { id: 'p1', name: '我', initialCash: 0, initialWise: 0 },
       { id: 'p2', name: '', initialCash: 0, initialWise: 0 },
     ],
+    // 同行者（2026-09-09）。**只是分帳對象，沒有錢包餘額**——
+    // 她不會去管別人皮夾裡有多少錢，只需要知道「這頓誰有份、他欠我多少」。
+    // 真的會代墊、需要自己錢包的人，加到上面的 payers 裡。
+    companions: [],             // [{ id, name }]
+    meId: 'p1',                 // 結算頁站在誰的角度看「誰欠我」
     schedule: [],               // [{ city, from, to }]
     quickAmounts: [100, 150, 500],
     apiKey: '',

@@ -18,6 +18,7 @@ import {
   byCategoryLocal, byPaymentLocal, byPayerLocal, byCityLocal,
 } from './stats.js';
 import { buildLines, toRecords, isBalanced, decimalsOf } from './split.js';
+import { settleUp, myShareTotals } from './settle.js';
 import { priceDiscountTotal } from './country-rules/japan.js';
 import * as db from './db.js';
 import { createQueue, STATUS } from './queue.js';
@@ -51,6 +52,7 @@ const state = {
   recMode: 'date',              // 紀錄頁：'date' 按日期 / 'cat' 按類別
   currentPayer: 'p1',
   swUpdate: null,               // 有新版本裝好在旁邊等時，放 ServiceWorkerRegistration
+  settlements: [],              // 還款紀錄（誰付給誰多少）
 };
 
 let queue;
@@ -179,6 +181,7 @@ async function reload() {
     .filter((r) => !draftIds.has(r.receiptId))
     .map((r) => derive(r, state.settings));
   state.wallet = await db.all(db.STORES.wallet);
+  state.settlements = await db.all(db.STORES.settlements);
   await loadAvatars();
 }
 
@@ -220,15 +223,15 @@ function wireTabs() {
 }
 
 function render() {
-  for (const name of ['home', 'records', 'scan', 'manual', 'stats', 'settings', 'confirm']) {
+  for (const name of ['home', 'records', 'scan', 'manual', 'stats', 'settle', 'settings', 'confirm']) {
     $(`tab-${name}`).hidden = name !== state.tab;
   }
   renderHeader();
   clearBanners();
   renderWarnings();
   ({ home: renderHome, records: renderRecords, scan: renderScan,
-     manual: renderManual, stats: renderStats, settings: renderSettings,
-     confirm: renderConfirm }[state.tab])();
+     manual: renderManual, stats: renderStats, settle: renderSettle,
+     settings: renderSettings, confirm: renderConfirm }[state.tab])();
 }
 
 function renderHeader() {
@@ -562,6 +565,93 @@ const payerOptions = () =>
 /** 付款人的名字（`p1` 是內部代號，不給人看）。 */
 const payerName = (id) =>
   (state.settings.payers || []).find((p) => p.id === id)?.name || id || '';
+
+// ---------------------------------------------------------------------------
+// 分帳的人（2026-09-09）
+//
+// 兩種人，刻意分開：
+//   · payers     —— 會自己掏錢的人，**有錢包餘額**，可以當付款人
+//   · companions —— 只是分帳對象，只有名字。她不會去管別人皮夾裡有多少錢
+// 分帳的時候兩種人都要出現，所以下面把它們合成一份清單。
+// ---------------------------------------------------------------------------
+
+/** 所有分得到帳的人（付款人 + 同行者），只含有名字的。 */
+const allPeople = () => [
+  ...(state.settings.payers || []).filter((p) => p.name).map((p) => ({ ...p, hasWallet: true })),
+  ...(state.settings.companions || []).filter((p) => p.name).map((p) => ({ ...p, hasWallet: false })),
+];
+
+/** 任何一個人的名字（付款人或同行者都查得到）。 */
+const personName = (id) => allPeople().find((p) => p.id === id)?.name || id || '';
+
+/** 結算頁站在誰的角度。預設 p1。 */
+const meId = () => state.settings.meId || 'p1';
+
+/**
+ * 「這筆誰有份」的說明文字。
+ * null / 空 = 沒指定 = 全部算付款人自己的（跟 settle.js 的 sharesOf 同一套規則）。
+ */
+function shareLabel(shares, payer) {
+  const people = allPeople();
+  const ids = (shares || []).filter((id) => people.some((p) => p.id === id));
+  if (!ids.length) return personName(payer) || '自己';
+  if (ids.length === people.length && people.length > 1) return `全部 ${ids.length} 人`;
+  if (ids.length > 3) return `${ids.length} 人`;
+  return ids.map(personName).join('、');
+}
+
+/**
+ * 一排可以點的人名 chip。
+ *
+ * ⚠️ 觸控目標 ≥ 52px 是她的硬規則（戴手套）。`.chip` 的樣式已經夠大，
+ *    所以這裡**不要**為了塞下 9 個人把 chip 縮小——寧可換行。
+ *
+ * @param selected 目前選了誰（陣列）
+ * @param onChange 選擇變動時呼叫，收到新的陣列
+ */
+function sharePicker(selected, onChange) {
+  const people = allPeople();
+  const box = el('div', { className: 'chips', style: 'margin-top:8px' });
+  const cur = new Set(selected || []);
+  const chips = new Map();
+
+  /**
+   * 把選取狀態換成 ids，**並且把畫面上的 chip 一起刷新**。
+   *
+   * ⚠️ 2026-09-09 實測抓到的 bug：原本兩顆快捷鍵只呼叫 onChange，
+   * 沒有更新 `cur` 也沒有更新 chip 的 aria-pressed。於是按了「只有付款人自己」
+   * 之後再點三個名字，是從**舊的 9 個人**去 toggle → 結果變成 6 人，
+   * 而且 chip 看起來還是全選。狀態一定要走同一個出口。
+   */
+  const setAll = (ids) => {
+    cur.clear();
+    for (const id of ids) cur.add(id);
+    for (const [id, c] of chips) c.setAttribute('aria-pressed', cur.has(id) ? 'true' : 'false');
+    onChange([...cur]);
+  };
+
+  for (const p of people) {
+    const c = el('button', { className: 'chip', textContent: p.name, type: 'button' });
+    c.setAttribute('aria-pressed', cur.has(p.id) ? 'true' : 'false');
+    c.onclick = () => {
+      const next = new Set(cur);
+      if (next.has(p.id)) next.delete(p.id); else next.add(p.id);
+      setAll([...next]);
+    };
+    chips.set(p.id, c);
+    box.append(c);
+  }
+
+  // 全選 / 清空。9 個人一個一個點太痛苦，這兩顆是實際上最常按的。
+  const quick = el('div', { className: 'chips', style: 'margin-top:8px' });
+  const all = el('button', { className: 'chip', textContent: '全部都有份', type: 'button' });
+  all.onclick = () => setAll(people.map((p) => p.id));
+  const none = el('button', { className: 'chip', textContent: '只有付款人自己', type: 'button' });
+  none.onclick = () => setAll([]);
+  quick.append(all, none);
+
+  return el('div', {}, [box, quick]);
+}
 
 const FACE_DEFAULT = ['🧕', '🧑'];
 
@@ -1533,6 +1623,58 @@ function renderSettings() {
   fx.append(el('div', { className: 'sub', textContent:
     'Wise 匯率沒填就套現金匯率——兩者都是「先換好的錢」，比刷卡匯率接近。' }));
 
+  // ── 同行者（2026-09-09）────────────────────────────────
+  // 跟「付款人」刻意分開：這些人只是分帳對象，沒有錢包餘額。
+  // 她不會去管別人皮夾裡有多少錢，只需要知道「這頓誰有份、他欠我多少」。
+  const comps = $('settingsCompanions');
+  if (comps) {
+    comps.textContent = '';
+    const list = state.settings.companions || [];
+
+    list.forEach((c, i) => {
+      const w = el('div', { className: 'field' }, [el('label', { textContent: `同行者 ${i + 1}` })]);
+      const row = el('div', { style: 'display:flex;gap:8px' });
+      const name = el('input', { value: c.name || '', placeholder: '名字', style: 'flex:1' });
+      name.onchange = async () => {
+        state.settings.companions[i].name = name.value;
+        await db.saveSettings(state.settings);
+        render();
+      };
+      const rm = el('button', { className: 'btn danger', style: 'padding:0 14px', textContent: '刪掉' });
+      rm.onclick = () => {
+        // ⚠️ 刪人不刪帳。已經記過的紀錄裡還留著他的 id，
+        //    settle.js 的 sharesOf 會把不存在的人濾掉，那幾筆就自動變成剩下的人平分。
+        //    所以這裡要講清楚後果，不要讓她以為只是清掉一個名字。
+        dialog('刪掉這個人？',
+          el('div', { className: 'sub', textContent:
+            `${c.name || '（沒有名字）'}。已經記過、他有份的帳會改成由剩下的人平分，` +
+            '欠款金額會跟著變。' }), [
+            ['刪掉', async () => {
+              $('dlg').close();
+              state.settings.companions = list.filter((x) => x !== c);
+              await db.saveSettings(state.settings);
+              render();
+            }, 'danger'],
+            ['算了', () => $('dlg').close()],
+          ]);
+      };
+      row.append(name, rm);
+      w.append(row);
+      comps.append(w);
+    });
+
+    const add = el('button', { className: 'btn wide', textContent: '＋ 加一個人' });
+    add.onclick = async () => {
+      // id 用時間戳，不要用 c1/c2 流水號——刪掉中間一個再新增會撞號，
+      // 撞號的後果是舊帳裡的「阿明」變成新加的那個人。
+      const id = `c${Date.now().toString(36)}`;
+      state.settings.companions = [...list, { id, name: '' }];
+      await db.saveSettings(state.settings);
+      render();
+    };
+    comps.append(add);
+  }
+
   const payers = $('settingsPayers'); payers.textContent = '';
   (state.settings.payers || []).forEach((p, i) => {
     const nameW = el('div', { className: 'field' }, [el('label', { textContent: `付款人 ${i + 1}` })]);
@@ -1941,6 +2083,174 @@ function closeConfirm() {
 
 const lineSum = (lines) => lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
 
+// ---------------------------------------------------------------------------
+// 分帳結算頁（2026-09-09）
+//
+// 這一頁回答一個問題：**回到新加坡，誰要給我多少錢。**
+//
+// ⚠️ 首頁的「總支出」跟這一頁的數字是兩件事，不可以混：
+//    · 首頁 = 掏出去的錢（她的錢包確實少了那麼多）
+//    · 這裡 = 誰欠誰（九人晚餐 ¥45,000 裡只有 ¥5,000 是她的）
+//    所以下面特別把「我真正花的」單獨印一行，免得她拿錯數字對預算。
+// ---------------------------------------------------------------------------
+function renderSettle() {
+  const box = $('settleBody');
+  box.textContent = '';
+  const people = allPeople();
+  const me = meId();
+
+  if (people.length < 2) {
+    box.append(el('div', { className: 'card' }, [
+      el('strong', { textContent: '還沒有其他人' }),
+      el('div', { className: 'sub', style: 'margin-top:6px', textContent:
+        '去設定頁的「同行者」把一起花錢的人加進來，記帳時才選得到誰有份。' }),
+    ]));
+    return;
+  }
+
+  const res = settleUp({
+    records: state.records,
+    settlements: state.settlements,
+    meId: me,
+    people,
+  });
+
+  // ── 我這趟真正花了多少（跟掏出去的錢分開）────────────────
+  const mine = myShareTotals(state.records, { meId: me, validIds: people.map((p) => p.id) });
+  if (Object.keys(mine).length) {
+    const card = el('div', { className: 'card' });
+    card.append(el('strong', { textContent: '我這趟真正的花費' }));
+    card.append(el('div', { className: 'sub', style: 'margin:4px 0 10px', textContent:
+      '代墊出去、之後會收回來的部分不算在裡面。' }));
+    for (const [c, v] of Object.entries(mine)) {
+      card.append(el('div', { className: 'row' }, [
+        el('span', { className: 'muted', textContent: c }),
+        el('span', { className: 'mid num', textContent: amt(v, c) }),
+      ]));
+    }
+    box.append(card);
+  }
+
+  if (!res.currencies.length) {
+    box.append(el('div', { className: 'card' }, [
+      el('strong', { textContent: '目前沒有人欠錢' }),
+      el('div', { className: 'sub', style: 'margin-top:6px', textContent:
+        '記帳時在確認頁選「這張誰有份」，這裡就會算出誰該還你多少。' }),
+    ]));
+    return;
+  }
+
+  // ── 每一種幣別各一區（鐵律 2：不同幣別絕對不相加）──────────
+  for (const currency of res.currencies) {
+    const g = res.byCurrency[currency];
+    box.append(el('div', { className: 'sect', textContent: `${currency} 結算` }));
+
+    if (g.totalOwedToMe) {
+      box.append(el('div', { className: 'card' }, [
+        el('div', { className: 'sub', textContent: '總共有人要還我' }),
+        el('div', { className: 'big num good', textContent: amt(g.totalOwedToMe, currency) }),
+      ]));
+    }
+    if (g.totalIOwe) {
+      box.append(el('div', { className: 'card' }, [
+        el('div', { className: 'sub', textContent: '我要還別人' }),
+        el('div', { className: 'big num bad', textContent: amt(g.totalIOwe, currency) }),
+      ]));
+    }
+
+    for (const r of g.rows) {
+      const card = el('div', { className: 'card' });
+      const top = el('div', { className: 'row' }, [
+        el('span', { style: 'font-weight:650', textContent: r.name }),
+        el('span', {
+          className: `mid num ${r.net > 0 ? 'good' : 'bad'}`,
+          textContent: amt(Math.abs(r.net), currency),
+        }),
+      ]);
+      card.append(top);
+      card.append(el('div', { className: 'sub', style: 'margin-top:2px',
+        textContent: r.net > 0 ? '他要還我' : '我要還他' }));
+
+      // 「已還款」——按下去記一筆，那個人就從清單消失
+      const btn = el('button', { className: 'btn wide', style: 'margin-top:12px',
+        textContent: r.net > 0 ? `${r.name} 還我了` : `我還 ${r.name} 了` });
+      btn.onclick = () => {
+        const owed = Math.abs(r.net);
+        const input = el('input', { type: 'number', inputMode: 'decimal', value: owed,
+          style: 'width:100%' });
+        dialog('記一筆還款', el('div', {}, [
+          el('div', { className: 'sub', textContent:
+            `${r.net > 0 ? `${r.name} 還你` : `你還 ${r.name}`}多少？全部還清就用預設值。` }),
+          el('div', { className: 'field', style: 'margin-top:10px' }, [
+            el('label', { textContent: `金額（${currency}）` }), input,
+          ]),
+        ]), [
+          ['確定', async () => {
+            const v = Number(input.value);
+            if (!Number.isFinite(v) || v <= 0) return;
+            $('dlg').close();
+            await db.put(db.STORES.settlements, {
+              // 錢的流向：他還我 → from 他 to 我
+              from: r.net > 0 ? r.personId : me,
+              to: r.net > 0 ? me : r.personId,
+              amount: v, currency, at: new Date().toISOString(),
+            });
+            await reload();
+            render();
+            banner('info', `已記錄：${r.name} ${amt(v, currency)}`);
+          }, 'primary'],
+          ['取消', () => $('dlg').close()],
+        ]);
+      };
+      card.append(btn);
+      box.append(card);
+    }
+
+    // 別人之間的債。不是她的事，但算出來了就順手講一聲，別讓她以為漏了。
+    if (g.others.length) {
+      const card = el('div', { className: 'card' });
+      card.append(el('div', { className: 'sub', textContent: '跟你無關，但順便算出來了' }));
+      for (const o of g.others) {
+        card.append(el('div', { className: 'row', style: 'margin-top:8px' }, [
+          el('span', { textContent: `${o.fromName} → ${o.toName}` }),
+          el('span', { className: 'num muted', textContent: amt(o.amount, currency) }),
+        ]));
+      }
+      box.append(card);
+    }
+  }
+
+  // ── 已經還過的（可以撤銷，按錯了要救得回來）──────────────
+  if (state.settlements.length) {
+    box.append(el('div', { className: 'sect', textContent: '已還款紀錄' }));
+    const card = el('div', { className: 'card' });
+    for (const st of [...state.settlements].reverse()) {
+      const row = el('div', { className: 'row', style: 'margin-bottom:10px' });
+      row.append(el('span', { className: 'sub', textContent:
+        `${personName(st.from)} → ${personName(st.to)}　${amt(st.amount, st.currency)}` }));
+      const undo = el('button', { className: 'btn danger', style: 'min-height:44px;padding:0 12px',
+        textContent: '撤銷' });
+      undo.onclick = () => {
+        dialog('撤銷這筆還款？',
+          el('div', { className: 'sub', textContent:
+            `${personName(st.from)} → ${personName(st.to)} ${amt(st.amount, st.currency)}。` +
+            '撤銷之後欠款會加回去。' }), [
+            ['撤銷', async () => {
+              $('dlg').close();
+              await db.del(db.STORES.settlements, st.id);
+              await reload();
+              render();
+            }, 'danger'],
+            ['算了', () => $('dlg').close()],
+          ]);
+      };
+      row.append(undo);
+      card.append(row);
+    }
+    box.append(card);
+  }
+}
+
 function renderConfirm() {
   const box = $('confirmBody');
   box.textContent = '';
@@ -1995,6 +2305,25 @@ function renderConfirm() {
   field('城市', rc.city, 'text', (v) => { rc.city = v; rc.citySource = 'manual'; });
   box.append(head);
 
+  // ── 這張誰有份（2026-09-09 分帳）─────────────────────────
+  //
+  // 她選的是「逐筆品項指定人」＝ 最準的做法。但一張超市長收據 20 筆，
+  // 每筆都要點人，戴手套站在店門口會很痛苦——所以這裡是**整張一次套用**，
+  // 混在一起的收據才需要展開下面的品項單獨改。準確度不打折，常見情況兩三下。
+  if (allPeople().length > 1) {
+    const sp = el('div', { className: 'card' });
+    sp.append(el('strong', { textContent: '這張誰有份' }));
+    sp.append(el('div', { className: 'sub', style: 'margin:4px 0 0', textContent:
+      '選了幾個人就平分成幾份。不選 = 全部算付款人自己的。' }));
+    sp.append(sharePicker(rc.shares, (ids) => {
+      rc.shares = ids.length ? ids : null;
+      // 整張改的時候，沒有被單獨改過的品項跟著走（跟上面「類別」同一個邏輯）
+      for (const l of d.lines) if (!l.sharesTouched) l.shares = rc.shares;
+      redraw();
+    }));
+    box.append(sp);
+  }
+
   // ── 辨識時就已經知道的問題 ───────────────────────────────
   if (rc.needsReview && rc.reviewReason) {
     box.append(el('div', { className: 'banner warn', textContent: `要看一下：${rc.reviewReason}` }));
@@ -2045,6 +2374,39 @@ function renderConfirm() {
     }
     catSel.onchange = () => { l.category = catSel.value; };
     nm.append(catSel);
+
+    // 這一行分給誰。整張的設定套下來了，只有真的要單獨改才點這顆。
+    if (allPeople().length > 1) {
+      const shareBtn = el('button', {
+        className: 'chip', type: 'button', style: 'margin-top:6px',
+        textContent: `👥 ${shareLabel(l.shares ?? rc.shares, rc.payer)}`,
+      });
+      shareBtn.onclick = () => {
+        let picked = [...(l.shares ?? rc.shares ?? [])];
+        const body = el('div', {}, [
+          el('div', { className: 'sub', textContent: `${l.name || '這一行'}　${amt(l.amount, cur)}` }),
+          sharePicker(picked, (ids) => { picked = ids; }),
+        ]);
+        dialog('這一行誰有份', body, [
+          ['確定', () => {
+            l.shares = picked.length ? picked : null;
+            // 標記成「她自己動過」，之後整張再改就不要蓋掉這一行
+            l.sharesTouched = true;
+            $('dlg').close();
+            redraw();
+          }],
+          ['跟整張一樣', () => {
+            l.shares = rc.shares;
+            l.sharesTouched = false;
+            $('dlg').close();
+            redraw();
+          }],
+          ['取消', () => $('dlg').close()],
+        ]);
+      };
+      nm.append(shareBtn);
+    }
+
     row.append(nm);
 
     const pr = el('div', { className: 'pr' });

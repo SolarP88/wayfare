@@ -12,7 +12,7 @@
  */
 
 const DB_NAME = 'travel-receipts';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export const STORES = {
   receipts: 'receipts',   // 一張收據（§6，2026-09-08 拆多筆之後才有）
@@ -21,6 +21,7 @@ export const STORES = {
   wallet: 'wallet',       // 錢包操作（§11）
   settings: 'settings',   // 單一一筆，id = 'main'
   queue: 'queue',         // 待辨識佇列（沒訊號時照樣拍，§3）
+  settlements: 'settlements',  // 誰還了誰多少錢（2026-09-09 分帳）
 };
 
 /** 收據的兩種狀態。draft 的東西**不進統計、不動錢包**，直到她按下確認。 */
@@ -107,6 +108,11 @@ export function openDB() {
       if (!db.objectStoreNames.contains(STORES.queue)) {
         const s = db.createObjectStore(STORES.queue, { keyPath: 'id' });
         s.createIndex('status', 'status');
+      }
+      // v3：還款紀錄。用 if 包住所以舊使用者升級時只會多這一個 store，
+      // 既有的收據 / 品項 / 錢包一個都不會動到。
+      if (!db.objectStoreNames.contains(STORES.settlements)) {
+        db.createObjectStore(STORES.settlements, { keyPath: 'id', autoIncrement: true });
       }
       void e;
     };
@@ -325,7 +331,7 @@ export async function clearAvatar(payerId) {
  */
 export async function clearAllRecords() {
   const db = await openDB();
-  const stores = [STORES.receipts, STORES.records, STORES.photos, STORES.wallet];
+  const stores = [STORES.receipts, STORES.records, STORES.photos, STORES.wallet, STORES.settlements];
   const t = db.transaction(stores, 'readwrite');
   for (const name of stores) t.objectStore(name).clear();
   return new Promise((resolve, reject) => {

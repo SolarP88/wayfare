@@ -434,6 +434,10 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
   </section>
 
     <!-- 確認收據內容（拍完先落地成草稿，她按確認才進統計） ------------------ -->
+  <section id="tab-settle" hidden>
+    <div id="settleBody"></div>
+  </section>
+
   <section id="tab-confirm" hidden>
     <div id="confirmBody"></div>
   </section>
@@ -487,6 +491,13 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       </div>
     </div>
     <div class="card"><strong>付款人與現金</strong><div id="settingsPayers"></div></div>
+    <div class="card">
+      <strong>同行者</strong>
+      <div class="sub" style="margin:4px 0 10px">
+        一起分帳但不用管他錢包的人。上面「付款人」是會自己掏錢、需要算現金餘額的人。
+      </div>
+      <div id="settingsCompanions"></div>
+    </div>
     <div class="card"><strong>行程</strong><div id="settingsSchedule"></div></div>
     <div class="card"><strong>API key 與用量</strong><div id="settingsApi"></div></div>
     <div class="card"><strong>出發前檢查清單</strong><ul class="list" id="preflight"></ul></div>
@@ -522,6 +533,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
   <button data-tab="scan"><b>📷</b>掃描</button>
   <button data-tab="manual"><b>✏️</b>手動</button>
   <button data-tab="stats"><b>📊</b>統計</button>
+  <button data-tab="settle"><b>🤝</b>分帳</button>
   <button data-tab="settings"><b>⚙️</b>設定</button>
 </nav>
 
