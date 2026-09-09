@@ -50,6 +50,7 @@ const state = {
   search: '',
   recMode: 'date',              // 紀錄頁：'date' 按日期 / 'cat' 按類別
   currentPayer: 'p1',
+  swUpdate: null,               // 有新版本裝好在旁邊等時，放 ServiceWorkerRegistration
 };
 
 let queue;
@@ -114,7 +115,39 @@ async function boot() {
   wireScan();
   wireHome();
   wireSettings();
+  wireUpdatePrompt();
   render();
+}
+
+// ---------------------------------------------------------------------------
+// 新版本提示（Service Worker）
+// ---------------------------------------------------------------------------
+
+/**
+ * index.html 那段註冊碼發現新版本裝好了，就丟 `wayfare-update` 過來。
+ *
+ * 為什麼不自動更新：她 2026-09-09 選的。自動重整最省事，但如果她正在
+ * 確認頁一個一個改品項，背景更新完成把頁面抽掉，打到一半的東西就沒了。
+ */
+function wireUpdatePrompt() {
+  window.addEventListener('wayfare-update', (e) => {
+    state.swUpdate = e.detail;
+    render();                    // 讓橫幅出現（真正畫出來的是 renderWarnings）
+  });
+}
+
+/** 按下「有新版本」橫幅：叫等在旁邊的 SW 接手，接手的那一刻重整。 */
+function applyUpdate() {
+  const reg = state.swUpdate;
+  if (!reg || !reg.waiting) return;
+  // controllerchange 在某些瀏覽器會連發兩次，重整兩次會閃。上鎖只跑一次。
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
+  reg.waiting.postMessage({ type: 'SKIP_WAITING' });
 }
 
 /**
@@ -232,6 +265,10 @@ function ratesNeeded() {
 /** 首頁紅字提醒（§17.4）。只講**現在就該處理**的，不要變成雜訊。 */
 function renderWarnings() {
   const s = state.settings;
+  // 放最上面：新版本可能就是在修她剛回報的那個 bug，不要被別的黃字蓋掉。
+  if (state.swUpdate) {
+    banner('info', '有新版本可以更新（會重新整理一次，沒存的東西會不見）', applyUpdate);
+  }
   if (!s.apiKey) banner('bad', '還沒填 API key，拍照無法辨識。去設定頁貼上。');
   // 只唸**用得到**的匯率。這趟不刷信用卡的人，不該被一條永遠消不掉的黃字追著跑。
   const missingRates = ratesNeeded().filter(([, ok]) => !ok).map(([label]) => label);

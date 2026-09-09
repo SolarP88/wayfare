@@ -533,5 +533,40 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 <!-- SheetJS 只用在「匯出 Excel」。載不到就退回 CSV，不會讓整個 App 掛掉 -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script type="module" src="src/app.js"></script>
+
+<script>
+  /* Service Worker —— 沒訊號也打得開（見 sw.js 開頭的說明）。
+     刻意寫在這裡而不是 app.js：app.js 是 module，萬一它掛了、或某個模組載不到，
+     這段還是會跑，離線能力不會跟著陪葬。
+
+     ⚠️ 用相對路徑 'sw.js'。GitHub Pages 掛在 /wayfare/ 子目錄，
+        寫成 '/sw.js' 會去要網站根目錄，404 而且 scope 也不對。 */
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', async () => {
+      try {
+        const reg = await navigator.serviceWorker.register('sw.js');
+
+        /* 有新版本裝好、而且**現在已經有 SW 在跑**（表示不是第一次安裝）
+           → 發事件給 app.js，由它跳橫幅問她。第一次安裝不用問，本來就沒舊版可比。 */
+        const announce = (sw) => {
+          if (!sw) return;
+          const check = () => {
+            if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+              window.dispatchEvent(new CustomEvent('wayfare-update', { detail: reg }));
+            }
+          };
+          check();
+          sw.addEventListener('statechange', check);
+        };
+
+        announce(reg.waiting);   // 上次開沒點更新，它還在旁邊等
+        reg.addEventListener('updatefound', () => announce(reg.installing));
+      } catch (e) {
+        /* 註冊失敗不影響使用，只是沒有離線能力。不要跳錯誤嚇人。 */
+        console.warn('[sw] 註冊失敗，這次沒有離線能力：', e);
+      }
+    });
+  }
+</script>
 </body>
 </html>
