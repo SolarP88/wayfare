@@ -20,7 +20,7 @@ import {
 import { buildLines, toRecords, isBalanced, decimalsOf } from './split.js';
 import { settleUp, myShareTotals } from './settle.js';
 import { refundRows, refundSummary, allocateActual, feeNote, REFUND_STATUS } from './refund.js';
-import { priceDiscountTotal } from './country-rules/japan.js';
+import { priceDiscountTotal, tenderDiscountTotal } from './country-rules/japan.js';
 import * as db from './db.js';
 import { createQueue, STATUS } from './queue.js';
 import { configureRateLimit } from './gemini.js';
@@ -1204,6 +1204,9 @@ async function onRecognized(item) {
     discounts: d.discounts,
     // 只有價格折扣要攤到品項上；點數折抵不改變合計（japan.js 的區分）
     priceDiscount: priceDiscountTotal(d.discounts),
+    // 付款端折抵：合計不變，但錢包少掉的錢要扣掉它（2026-09-10 補）。
+    // 在這之前 cashPaid 讀進來就丟掉了，錢包每次都多扣。
+    tenderDiscount: tenderDiscountTotal(d.discounts),
     cashPaid: d.cashPaid, cashReceived: d.cashReceived, change: d.change,
     items: d.items,
     entryMode: 'scan',
@@ -2912,10 +2915,35 @@ function renderConfirm() {
     el('span', { className: 'num', textContent: amt(sum, cur) })]));
   totals.append(el('div', { className: 'sumline tot' }, [
     el('span', { textContent: '合計' }), el('span', { className: 'num', textContent: amt(rc.total, cur) })]));
+
   const home = rc.total == null ? null : toHomeAmount(rc);
   if (home != null) {
     totals.append(el('div', { className: 'sumline', style: 'justify-content:flex-end' }, [
       el('span', { className: 'num', textContent: `≈ ${homeM(home)}` })]));
+  }
+
+  // ── 實付（2026-09-10 加）──────────────────────────────────
+  // 合計 = 東西值多少（統計、預算、分帳都用這個）
+  // 實付 = 真正離開錢包的錢（點數折抵、商品券、無現金回饋之後）
+  // 兩個一樣時不顯示，免得每張收據都多一行沒有資訊量的東西。
+  if (rc.total != null) {
+    const paid = rc.total - (rc.tenderDiscount || 0);
+    const paidIn = el('input', {
+      type: 'number', inputMode: 'numeric', value: paid,
+      style: 'width:120px;text-align:right',
+    });
+    paidIn.onchange = () => {
+      const v = Number(paidIn.value);
+      // 實付不可能大於合計（那是找零，不是折抵）；填錯就退回合計
+      rc.tenderDiscount = Number.isFinite(v) && v >= 0 && v <= rc.total ? rc.total - v : 0;
+      redraw();
+    };
+    totals.append(el('div', { className: 'sumline' }, [
+      el('span', { textContent: '實付（錢包少掉的）' }), paidIn]));
+    if (rc.tenderDiscount > 0) {
+      totals.append(el('div', { className: 'sub', style: 'text-align:right;margin-top:-4px' },
+        [document.createTextNode(`點數／券折抵 ${amt(rc.tenderDiscount, cur)}，合計不變`)]));
+    }
   }
   items.append(totals);
   box.append(items);

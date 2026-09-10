@@ -50,6 +50,25 @@ export function affectsCash(r, settings) {
 }
 
 /**
+ * 這一筆真正**離開錢包**的錢。
+ *
+ * ⚠️ 跟 `r.amount` 不一樣，兩個都要有（2026-09-10 補的洞）：
+ *   · `amount`  = 東西值多少 → 統計、預算、分帳
+ *   · 這一支    = 錢包少掉多少 → 現金／Wise 餘額、燒錢速度
+ *
+ * 差在**付款端折抵**：點數折抵、商品券、無現金回饋。
+ * 例：合計 ¥1,161、キャッシュレス還元 −22、nanaco支払 ¥1,139
+ *     → 東西值 1,161，但錢包只少了 1,139。
+ *
+ * 在這之前 App 讀到了 cashPaid 卻沒有任何地方用它，錢包每次都多扣。
+ * `tenderDiscount` 只掛在收據的第一筆品項（split.js:toRecords），
+ * 所以整張加起來剛好扣一次。
+ */
+export function cashOut(r) {
+  return (r?.amount || 0) - (r?.tenderDiscount || 0);
+}
+
+/**
  * 算某位付款人某個罐子的餘額。
  *
  * 餘額 = Σ(這個罐子的錢包操作) − Σ(該付款人、走這個罐子的消費)
@@ -71,7 +90,7 @@ export function potBalance(payerId, pot, records, walletOps, settings) {
   }
   for (const r of records) {
     if (r.payer !== payerId || !affectsPot(r, pot, settings)) continue;
-    bal -= r.amount || 0;
+    bal -= cashOut(r);
   }
   return bal;
 }
@@ -128,7 +147,7 @@ export function cashBurn(payerId, records, walletOps, settings, today) {
     if (r.payer !== payerId || !affectsCash(r, settings) || r.isPreTrip) continue;
     const d = localDay(r.date);
     if (!d || Date.parse(d) < Date.parse(start) || Date.parse(d) > Date.parse(now)) continue;
-    spent += r.amount || 0;
+    spent += cashOut(r);
   }
   if (spent <= 0) return null;
 

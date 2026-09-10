@@ -289,6 +289,11 @@ export function toRecords(receipt, lines) {
     reviewed: !!receipt.reviewed,
     reviewReason: receipt.reviewReason || null,
 
+    // 付款端折抵（點數／商品券／無現金回饋）。**只掛第一筆**，理由同 taxRefundPending：
+    // 每一筆都放，錢包會重複扣好幾次。
+    // 它**不改變合計**（東西還是值那麼多），只改變真正離開錢包的錢。
+    tenderDiscount: i === 0 ? (receipt.tenderDiscount ?? null) : null,
+
     taxRefundPending: i === 0 ? (receipt.taxRefundPending ?? null) : null,
     refundStatus: i === 0 ? (receipt.refundStatus ?? 'none') : 'none',
     // 實退金額也只掛第一筆，理由同上（每筆都放會被重複加總）。
