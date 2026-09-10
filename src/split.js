@@ -21,6 +21,9 @@ export function decimalsOf(currency) {
   return ZERO_DECIMAL.includes(currency) ? 0 : 2;
 }
 
+/** 品項自己的稅制標註。null / 其他值 = 沒標，跟著整張收據走。 */
+export const TAX_KINDS = ['税抜', '税込', '非課税'];
+
 /** 換成「最小單位」的整數來算，避免浮點數在加總時漂掉。 */
 export function toMinor(x, decimals) {
   return Math.round((x || 0) * 10 ** decimals);
@@ -30,9 +33,35 @@ export function fromMinor(m, decimals) {
   return decimals ? m / 10 ** decimals : m;
 }
 
-/** 日本消費稅：食品等輕減稅率 8%，其餘 10%（§7）。 */
+/**
+ * 日本消費稅：食品等輕減稅率 8%，其餘 10%（§7）。
+ *
+ * `taxKind: '非課税'` 回 0 —— 郵票、印花、商品券這類本來就沒有稅，
+ * 給它 10% 會讓整張加總浮起來（2026-09-10 那張 7-11 的 50 円切手就是）。
+ */
 export function taxRateOf(item) {
+  if (item?.taxKind === '非課税') return 0;
   return item?.reducedTax ? 0.08 : 0.10;
+}
+
+/**
+ * 這一項的價格**要不要再加稅**。
+ *
+ * ⚠️ 2026-09-10 實測抓到的：稅制不是「整張一種」。
+ * 她那張 7-11 一張裡就有三種——
+ *   `*130`（税抜 8%）、`490込`（已含稅）、`50非`（非課税）。
+ * 原本 split.js 只看整張的 taxType，於是把 490 和 50 也乘上 1.1，
+ * 加總 1,215 對不上合計 1,161（差的 49 + 5 = 54 就是這樣來的），整張就拆不開。
+ *
+ * @param item        normalizeItems 出來的品項
+ * @param receiptGaizei 整張收據是不是外税（品項沒標註時的退路）
+ */
+export function needsTaxAdded(item, receiptGaizei) {
+  // 品項自己標了就聽它的——它看得到那一行印的是「込」還是「非」
+  if (item?.taxKind === '税込' || item?.taxKind === '非課税') return false;
+  if (item?.taxKind === '税抜') return true;
+  // 沒標註 = 舊資料 / 模型沒給 → 完全沿用原本的行為，一個位元都不變
+  return !!receiptGaizei;
 }
 
 /**
@@ -55,6 +84,8 @@ export function normalizeItems(items) {
         qty,
         unitPrice,
         reducedTax: !!it.reducedTax,
+        // 這一項印的是税抜 / 税込 / 非課税。沒給就是 null = 跟著整張走（舊行為）
+        taxKind: TAX_KINDS.includes(it.taxKind) ? it.taxKind : null,
         taxRate: taxRateOf(it),
         base: it.amount != null && it.qty == null ? Number(it.amount) : unitPrice * qty,
       };
@@ -90,10 +121,12 @@ export function splitReceipt(receipt = {}) {
   const totalM = toMinor(total, d);
   const gaizei = receipt.taxType === '外税';
 
-  // ① 每一項照自己的稅率算含稅金額。内税／免税／不明 → 印出來的就是含稅價。
+  // ① 每一項照**自己**的稅制算含稅金額。
+  //    ⚠️ 逐項判斷，不是整張一個旗標——同一張收據可以混税抜／税込／非課税
+  //    （日本便利商店幾乎都這樣印）。判斷在 needsTaxAdded()，那裡有完整說明。
   let lines = items.map((it) => {
     const baseM = toMinor(it.base, d);
-    const grossM = gaizei ? Math.round(baseM * (1 + it.taxRate)) : baseM;
+    const grossM = needsTaxAdded(it, gaizei) ? Math.round(baseM * (1 + it.taxRate)) : baseM;
     return { ...it, baseM, grossM, amountM: grossM };
   });
 
