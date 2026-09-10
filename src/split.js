@@ -231,6 +231,10 @@ export function toRecords(receipt, lines) {
     // 這一筆是分給誰的（2026-09-09）。沒指定就跟著整張收據；
     // 整張也沒指定就是 null = 全部算付款人自己的（舊資料的行為，不可以改）。
     shares: l.shares || receipt.shares || null,
+    // 誰算幾份（2026-09-10）。選填，沒有 = 每人 1 份 = 平分。
+    // ⚠️ 跟 shares 綁在一起走：只帶 shares 不帶 weights 的話，
+    //    她在確認頁設好的「阿明兩份」存檔就沒了，而且畫面上看不出來。
+    weights: l.weights || receipt.weights || null,
 
     // 從收據繼承的（列表、統計、錢包都靠這些）
     date: receipt.date,

@@ -21,8 +21,8 @@
 
 /* deploy.sh 會把這行換成當次檔案內容的雜湊。
    換一個版本號 = 換一個 cache 名字 = 手機下次連上網就會抓到新版。
-   本機直接開檔時就維持 a0ac5be018d7，不影響功能。 */
-const VERSION = 'a0ac5be018d7';
+   本機直接開檔時就維持 1032db0e431f，不影響功能。 */
+const VERSION = '1032db0e431f';
 const CACHE = `wayfare-${VERSION}`;
 
 /* 版本號還是佔位符 = 這份沒有經過 deploy.sh = **本機開發中**。

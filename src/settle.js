@@ -58,18 +58,62 @@ export function sharesOf(record, validIds = null) {
  */
 export function shareAmountsMinor(amountMinor, count, remainderTo = 0) {
   if (count <= 0) return [];
+  return weightedAmountsMinor(amountMinor, new Array(count).fill(1), remainderTo);
+}
+
+/**
+ * 這一筆裡每個人算幾份。
+ *
+ * 2026-09-10 加的。本來一律平分，她要的是「阿明點了兩份」這種情況。
+ * `record.weights` 是**選填**的 `{ 人id: 份數 }` —— 沒有這一欄就是每人 1 份，
+ * 也就是九月十號以前所有的資料**行為一個位元都不會變**（跟鐵律 3 同一個道理）。
+ *
+ * 份數一律收斂成 1..99 的整數。**不接受 0 份**：0 的意思是「他沒有份」，
+ * 那該做的是把人從 `shares` 拿掉，而不是在這裡留一個 0 ——
+ * 留 0 會讓總份數算錯，全部都是 0 還會除以零。
+ *
+ * @param record 一筆品項紀錄
+ * @param ids    這筆分給誰（`sharesOf` 的結果）；回傳的份數跟它同順序
+ */
+export function weightsOf(record, ids = []) {
+  const w = record?.weights;
+  return ids.map((id) => {
+    const n = Math.round(Number(w?.[id]));
+    return Number.isFinite(n) && n >= 1 ? Math.min(n, 99) : 1;
+  });
+}
+
+/**
+ * 按**份數**分一筆金額，一樣保證加起來完全等於原金額。
+ *
+ * 每人先拿 floor(金額 × 他的份數 ÷ 總份數)，剩下的餘數從付款人那一格開始
+ * 一個單位一個單位發出去 —— 跟平分版是同一條餘數規則（鐵律 1）。
+ *
+ * ⚠️ 全部都是 1 份的時候，結果必須跟舊的平分**完全一樣**：
+ * floor(abs × 1 ÷ n) === floor(abs ÷ n)，餘數迴圈也一模一樣。
+ * `test_settle` 有一組隨機對拍在盯這件事，不要改壞。
+ *
+ * 例：¥45,000、9 個人、阿明 2 份 → 總共 10 份 → 阿明 ¥9,000、其他 8 人各 ¥4,500。
+ */
+export function weightedAmountsMinor(amountMinor, weights = [], remainderTo = 0) {
+  const n = weights.length;
+  if (n <= 0) return [];
+  const w = weights.map((x) => {
+    const v = Math.round(Number(x));
+    return Number.isFinite(v) && v >= 1 ? Math.min(v, 99) : 1;
+  });
+  const total = w.reduce((s, x) => s + x, 0);
   const sign = amountMinor < 0 ? -1 : 1;
   const abs = Math.abs(amountMinor);
-  const base = Math.floor(abs / count);
-  let rest = abs - base * count;
 
-  const out = new Array(count).fill(base);
+  const out = w.map((x) => Math.floor((abs * x) / total));
+  let rest = abs - out.reduce((s, x) => s + x, 0);
   // 從付款人那格開始發餘數，發完為止
-  let i = Math.max(0, Math.min(count - 1, remainderTo));
+  let i = Math.max(0, Math.min(n - 1, remainderTo));
   while (rest > 0) {
     out[i] += 1;
     rest -= 1;
-    i = (i + 1) % count;
+    i = (i + 1) % n;
   }
   return out.map((x) => x * sign);
 }
@@ -103,7 +147,7 @@ export function rawDebts(records = [], { validIds = null } = {}) {
 
     // 餘數塞給付款人自己（鐵律 1）
     const payerIdx = ids.indexOf(payer);
-    const parts = shareAmountsMinor(amountM, ids.length, payerIdx >= 0 ? payerIdx : 0);
+    const parts = weightedAmountsMinor(amountM, weightsOf(r, ids), payerIdx >= 0 ? payerIdx : 0);
 
     const cur = (out[currency] ||= {});
     ids.forEach((who, i) => {
@@ -261,7 +305,7 @@ export function myShareTotals(records = [], { meId = 'p1', validIds = null } = {
     const d = decimalsOf(currency);
     const amountM = toMinor(amount, d);
     const payerIdx = ids.indexOf(r.payer);
-    const parts = shareAmountsMinor(amountM, ids.length, payerIdx >= 0 ? payerIdx : 0);
+    const parts = weightedAmountsMinor(amountM, weightsOf(r, ids), payerIdx >= 0 ? payerIdx : 0);
     const myPart = parts[ids.indexOf(meId)];
 
     out[currency] = (out[currency] || 0) + myPart;
@@ -297,7 +341,7 @@ export function toMyShare(records = [], { meId = 'p1', validIds = null } = {}) {
     const currency = r.currency || 'JPY';
     const d = decimalsOf(currency);
     const payerIdx = ids.indexOf(r.payer);
-    const parts = shareAmountsMinor(toMinor(amount, d), ids.length, payerIdx >= 0 ? payerIdx : 0);
+    const parts = weightedAmountsMinor(toMinor(amount, d), weightsOf(r, ids), payerIdx >= 0 ? payerIdx : 0);
     const myAmount = fromMinor(parts[ids.indexOf(meId)], d);
 
     out.push({

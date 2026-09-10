@@ -230,6 +230,16 @@ button,select,input,textarea{font:inherit;color:inherit}
 }
 .chip[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
 
+/* 份數：一個人一列，加減鍵 52px（§14 戴手套單手） */
+.wrow{display:flex;align-items:center;gap:10px;padding:4px 0}
+.wrow .wname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wbtn{
+  width:52px;height:52px;flex:0 0 auto;border-radius:14px;border:1px solid var(--line);
+  background:var(--card);color:var(--ink);font-size:22px;line-height:1;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.wrow .wnum{min-width:56px;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}
+
 /* 下方 Tab bar：主要操作在拇指區（§14 單手操作） */
 nav{
   position:fixed;left:0;right:0;bottom:0;z-index:10;

@@ -602,13 +602,21 @@ const meId = () => state.settings.meId || 'p1';
  * 「這筆誰有份」的說明文字。
  * null / 空 = 沒指定 = 全部算付款人自己的（跟 settle.js 的 sharesOf 同一套規則）。
  */
-function shareLabel(shares, payer) {
+function shareLabel(shares, payer, weights = null) {
   const people = allPeople();
   const ids = (shares || []).filter((id) => people.some((p) => p.id === id));
   if (!ids.length) return personName(payer) || '自己';
-  if (ids.length === people.length && people.length > 1) return `全部 ${ids.length} 人`;
-  if (ids.length > 3) return `${ids.length} 人`;
-  return ids.map(personName).join('、');
+
+  // 有人不只一份就要講出來。「全部 9 人」看起來像平分，
+  // 實際上阿明吃兩份的話那是另一個數字——摘要騙人比沒有摘要更糟。
+  const extra = ids
+    .filter((id) => Math.round(Number(weights?.[id])) > 1)
+    .map((id) => `${personName(id)} ×${Math.round(Number(weights[id]))}`);
+  const tail = extra.length ? `（${extra.join('、')}）` : '';
+
+  if (ids.length === people.length && people.length > 1) return `全部 ${ids.length} 人${tail}`;
+  if (ids.length > 3) return `${ids.length} 人${tail}`;
+  return ids.map(personName).join('、') + tail;
 }
 
 /**
@@ -620,11 +628,24 @@ function shareLabel(shares, payer) {
  * @param selected 目前選了誰（陣列）
  * @param onChange 選擇變動時呼叫，收到新的陣列
  */
-function sharePicker(selected, onChange) {
+function sharePicker(selected, onChange, weights = null) {
   const people = allPeople();
   const box = el('div', { className: 'chips', style: 'margin-top:8px' });
   const cur = new Set(selected || []);
   const chips = new Map();
+
+  // ── 份數（2026-09-10 她要的加權）────────────────────────
+  // 預設**收起來**，收起來的時候這一區完全不存在 = 跟加這個功能之前一模一樣。
+  // 她的硬規則是戴手套單手操作，所以不讓每個人名旁邊常駐 +/−（會把 9 個人的
+  // 選人區撐掉大半個畫面），改成需要的時候才展開一列一列的大顆加減鍵。
+  const wt = new Map();
+  for (const p of people) {
+    const n = Math.round(Number(weights?.[p.id]));
+    wt.set(p.id, Number.isFinite(n) && n >= 1 ? Math.min(n, 99) : 1);
+  }
+  // 這一筆本來就有加權 → 直接展開，不然她根本看不到自己上次設了什麼
+  let wtOpen = [...wt.values()].some((n) => n > 1);
+  const rowsBox = el('div', {});
 
   /**
    * 把選取狀態換成 ids，**並且把畫面上的 chip 一起刷新**。
@@ -634,12 +655,52 @@ function sharePicker(selected, onChange) {
    * 之後再點三個名字，是從**舊的 9 個人**去 toggle → 結果變成 6 人，
    * 而且 chip 看起來還是全選。狀態一定要走同一個出口。
    */
+  /** 往外送：ids ＋ 份數。**只送 >1 的**，全部平分時 weights 是 null（跟舊資料同形狀）。 */
+  const emit = () => {
+    const ids = [...cur];
+    const w = {};
+    for (const id of ids) if ((wt.get(id) || 1) > 1) w[id] = wt.get(id);
+    onChange(ids, Object.keys(w).length ? w : null);
+  };
+
   const setAll = (ids) => {
     cur.clear();
     for (const id of ids) cur.add(id);
     for (const [id, c] of chips) c.setAttribute('aria-pressed', cur.has(id) ? 'true' : 'false');
-    onChange([...cur]);
+    drawRows();
+    emit();
   };
+
+  /** 份數那幾列。只列**有份的人**——沒份的人給他幾份都沒有意義。 */
+  function drawRows() {
+    rowsBox.textContent = '';
+    if (!wtOpen) return;
+    const ids = [...cur];
+    if (ids.length < 2) {
+      rowsBox.append(el('div', { className: 'sub', style: 'margin-top:8px',
+        textContent: '至少要有兩個人有份，才需要分份數。' }));
+      return;
+    }
+    rowsBox.append(el('div', { className: 'sub', style: 'margin:8px 0 4px',
+      textContent: '誰吃得多就給他多一份。金額按總份數分。' }));
+    for (const id of ids) {
+      const val = el('span', { className: 'wnum', textContent: `${wt.get(id)} 份` });
+      const minus = el('button', { className: 'wbtn', type: 'button', textContent: '−' });
+      const plus = el('button', { className: 'wbtn', type: 'button', textContent: '＋' });
+      minus.setAttribute('aria-label', `${personName(id)} 少一份`);
+      plus.setAttribute('aria-label', `${personName(id)} 多一份`);
+      const bump = (d) => {
+        wt.set(id, Math.max(1, Math.min(99, wt.get(id) + d)));
+        val.textContent = `${wt.get(id)} 份`;
+        emit();
+      };
+      minus.onclick = () => bump(-1);
+      plus.onclick = () => bump(1);
+      rowsBox.append(el('div', { className: 'wrow' }, [
+        el('span', { className: 'wname', textContent: personName(id) }), minus, val, plus,
+      ]));
+    }
+  }
 
   for (const p of people) {
     const c = el('button', { className: 'chip', textContent: p.name, type: 'button' });
@@ -661,7 +722,27 @@ function sharePicker(selected, onChange) {
   none.onclick = () => setAll([]);
   quick.append(all, none);
 
-  return el('div', {}, [box, quick]);
+  // ⚖️ 份數開關。收起來就是回到平分——但**不會安靜地把她設好的份數丟掉**，
+  // 有加權時先問一句。金額會因此改變，靜靜歸零是最糟的那種 bug。
+  if (people.length > 1) {
+    const wbtn = el('button', { className: 'chip', textContent: '⚖️ 份數', type: 'button' });
+    wbtn.setAttribute('aria-pressed', wtOpen ? 'true' : 'false');
+    wbtn.onclick = () => {
+      if (wtOpen && [...wt.values()].some((n) => n > 1)
+          && !confirm('收起來會回到每個人一份，確定？')) return;
+      wtOpen = !wtOpen;
+      wbtn.setAttribute('aria-pressed', wtOpen ? 'true' : 'false');
+      if (!wtOpen) {
+        for (const id of wt.keys()) wt.set(id, 1);
+        emit();
+      }
+      drawRows();
+    };
+    quick.append(wbtn);
+  }
+
+  drawRows();
+  return el('div', {}, [box, quick, rowsBox]);
 }
 
 const FACE_DEFAULT = ['🧕', '🧑'];
@@ -2218,6 +2299,15 @@ async function openReceipt(receiptId, returnTab) {
       seq: l.seq, name: l.name, nameLocal: l.nameLocal, qty: l.qty,
       unitPrice: l.unitPrice, taxRate: l.taxRate, amount: l.amount,
       category: l.category, adjusted: l.adjusted, note: l.note,
+      // ⚠️ 分帳要跟著回來（2026-09-10 補的洞，② 上線時就漏了）。
+      // 沒帶的話：她把「生啤只有三個人」逐行設好存檔，之後重開這張收據
+      // 改個店名再存一次，那幾行就被整張的值默默蓋掉——畫面上完全看不出來，
+      // 要等回國算錢才會發現數字不對。
+      shares: l.shares || null,
+      weights: l.weights || null,
+      // 這一行跟整張不一樣 = 她單獨動過，之後改整張不可以蓋掉它
+      sharesTouched: !!l.shares
+        && JSON.stringify(l.shares) !== JSON.stringify(rc.shares || null),
     })),
   };
   state.returnTab = returnTab || state.tab;
@@ -2688,13 +2778,14 @@ function renderConfirm() {
     const sp = el('div', { className: 'card' });
     sp.append(el('strong', { textContent: '這張誰有份' }));
     sp.append(el('div', { className: 'sub', style: 'margin:4px 0 0', textContent:
-      '選了幾個人就平分成幾份。不選 = 全部算付款人自己的。' }));
-    sp.append(sharePicker(rc.shares, (ids) => {
+      '選了幾個人就平分成幾份。有人要算兩份就按「⚖️ 份數」。不選 = 全部算付款人自己的。' }));
+    sp.append(sharePicker(rc.shares, (ids, w) => {
       rc.shares = ids.length ? ids : null;
+      rc.weights = w;
       // 整張改的時候，沒有被單獨改過的品項跟著走（跟上面「類別」同一個邏輯）
-      for (const l of d.lines) if (!l.sharesTouched) l.shares = rc.shares;
+      for (const l of d.lines) if (!l.sharesTouched) { l.shares = rc.shares; l.weights = rc.weights; }
       redraw();
-    }));
+    }, rc.weights));
     box.append(sp);
   }
 
@@ -2753,17 +2844,19 @@ function renderConfirm() {
     if (allPeople().length > 1) {
       const shareBtn = el('button', {
         className: 'chip', type: 'button', style: 'margin-top:6px',
-        textContent: `👥 ${shareLabel(l.shares ?? rc.shares, rc.payer)}`,
+        textContent: `👥 ${shareLabel(l.shares ?? rc.shares, rc.payer, l.weights ?? rc.weights)}`,
       });
       shareBtn.onclick = () => {
         let picked = [...(l.shares ?? rc.shares ?? [])];
+        let pickedW = l.weights ?? rc.weights ?? null;
         const body = el('div', {}, [
           el('div', { className: 'sub', textContent: `${l.name || '這一行'}　${amt(l.amount, cur)}` }),
-          sharePicker(picked, (ids) => { picked = ids; }),
+          sharePicker(picked, (ids, w) => { picked = ids; pickedW = w; }, pickedW),
         ]);
         dialog('這一行誰有份', body, [
           ['確定', () => {
             l.shares = picked.length ? picked : null;
+            l.weights = pickedW;
             // 標記成「她自己動過」，之後整張再改就不要蓋掉這一行
             l.sharesTouched = true;
             $('dlg').close();
@@ -2771,6 +2864,7 @@ function renderConfirm() {
           }],
           ['跟整張一樣', () => {
             l.shares = rc.shares;
+            l.weights = rc.weights;
             l.sharesTouched = false;
             $('dlg').close();
             redraw();
