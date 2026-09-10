@@ -12,6 +12,10 @@
  *    原本寫死新制的版本會把一張正確的舊制免税收據判成錯誤。查證見規格 §16。
  */
 
+import { normalizeItems, needsTaxAdded } from '../split.js';
+// ⚠️ 只用它的**純計算**（品項含稅加總），不碰 DOM 也不碰 DB。
+//    split.js 沒有 import 任何東西，所以不會繞回來變成循環相依。
+
 export const meta = {
   code: 'JP',
   name: '日本',
@@ -452,7 +456,27 @@ export function validate(r, ctx = {}) {
   //   外税 小計 + 稅 − 折扣 = 合計
   //   内税 小計 − 折扣 = 合計   （稅已含在小計裡）
   // 不強制先判稅制——哪一條成立就算過，兩條都不成立才是真的有問題。
-  if (r.subtotal != null && r.total != null) {
+  // ⚠️ 混稅制的收據（同一張有 税抜 ＋ 税込／非課税）**不能**用「小計＋稅＝合計」驗。
+  // 收據上的「小計(税抜8%) 270 ＋ 小計(税抜10%) 300」只涵蓋税抜那幾項，
+  // 香菸的 490込 和郵票的 50非 從來就不在這個小計裡，怎麼算都差一截。
+  // 2026-09-10 她那張 7-11 就被這樣誤報：570 + 51 = 621 ≠ 1,161。
+  // 這種的改驗「逐項含稅加總 − 折扣 = 合計」，跟 splitReceipt 同一套算法。
+  const itemKinds = new Set((r.items || []).map((it) => it?.taxKind).filter(Boolean));
+  const mixedTax = itemKinds.has('税込') || itemKinds.has('非課税');
+
+  if (mixedTax && r.total != null) {
+    const gaizei = r.taxType === '外税';
+    const gross = normalizeItems(r.items).reduce(
+      (s, it) => s + (needsTaxAdded(it, gaizei) ? Math.round(it.base * (1 + it.taxRate)) : it.base),
+      0,
+    );
+    if (!near(gross - disc, r.total)) {
+      issues.push(
+        `驗算①（逐項）對不上：這張混了税抜／税込／非課税，` +
+        `品項含稅加總 ${gross} − 折扣 ${disc} = ${gross - disc}，不等於合計 ${r.total}`
+      );
+    }
+  } else if (r.subtotal != null && r.total != null) {
     const asGaizei = near(r.subtotal + tax - disc, r.total);
     const asUchizei = near(r.subtotal - disc, r.total);
     // 有些收據（藥妝店逐項打折）印的「小計」已經是折後金額，
