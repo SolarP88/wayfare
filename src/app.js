@@ -17,7 +17,7 @@ import {
   tripTotalLocal, todayTotalLocal, otherCurrencyTotal,
   byCategoryLocal, byPaymentLocal, byPayerLocal, byCityLocal, dailyAllowance,
 } from './stats.js';
-import { buildLines, toRecords, isBalanced, decimalsOf } from './split.js';
+import { buildLines, toRecords, isBalanced, decimalsOf, foldTender } from './split.js';
 import { settleUp, myShareTotals } from './settle.js';
 import { refundRows, refundSummary, allocateActual, feeNote, REFUND_STATUS } from './refund.js';
 import { priceDiscountTotal, tenderDiscountTotal } from './country-rules/japan.js';
@@ -1184,11 +1184,20 @@ async function onRecognized(item) {
   const dateNote = d.date ? null
     : `收據上沒有日期，已用拍照時間 ${String(date).slice(5, 16).replace('T', ' ')} 代替（不對就改上面的日期欄位）`;
 
+  // 付款端折抵併進合計（2026-09-11 她選「全部改用實付」，理由見 split.js:foldTender）
+  const folded = foldTender({
+    total: d.total,
+    priceDiscount: priceDiscountTotal(d.discounts),
+    tenderDiscount: tenderDiscountTotal(d.discounts),
+    currency: state.settings.localCurrency,
+  });
+
   const receipt = {
     id: item.id,
     date,
     storeName: d.storeName, storeNameLocal: d.storeNameLocal,
-    total: d.total,
+    total: folded.total,
+    printedTotal: folded.printedTotal,   // 收據原本印的合計，只給確認頁說明用
     subtotal: d.subtotal,
     currency: state.settings.localCurrency,
     payer: state.currentPayer,
@@ -1202,11 +1211,10 @@ async function onRecognized(item) {
     taxRefundPending: d.taxRefundPending,
     refundStatus: d.taxRefundPending > 0 ? 'pending' : 'none',
     discounts: d.discounts,
-    // 只有價格折扣要攤到品項上；點數折抵不改變合計（japan.js 的區分）
-    priceDiscount: priceDiscountTotal(d.discounts),
-    // 付款端折抵：合計不變，但錢包少掉的錢要扣掉它（2026-09-10 補）。
-    // 在這之前 cashPaid 讀進來就丟掉了，錢包每次都多扣。
-    tenderDiscount: tenderDiscountTotal(d.discounts),
+    // 價格折扣＋付款端折抵，一起攤到品項上（2026-09-11 起兩類都進合計）
+    priceDiscount: folded.priceDiscount,
+    // 只給確認頁說明「折抵了多少」，不參與計算、不帶進品項紀錄
+    tenderDiscount: folded.tenderDiscount,
     cashPaid: d.cashPaid, cashReceived: d.cashReceived, change: d.change,
     items: d.items,
     entryMode: 'scan',
@@ -2756,7 +2764,9 @@ function renderConfirm() {
     head.append(el('div', { className: 'sub', style: 'margin:-8px 0 12px', textContent: rc.storeNameLocal }));
   }
   field('日期時間', String(rc.date || '').slice(0, 16), 'datetime-local', (v) => { rc.date = v; });
-  field('合計（收據上印的那個數字）', rc.total, 'number', (v) => { rc.total = v; redraw(); });
+  // 有點數／回饋折抵的收據，這裡已經是扣完的實付（split.js:foldTender），標籤要講清楚
+  field(rc.printedTotal != null ? '合計（實付，已扣點數／回饋折抵）' : '合計（收據上印的那個數字）',
+    rc.total, 'number', (v) => { rc.total = v; redraw(); });
   // ⚠️ 幣別一定要能改。拆多筆重做這一頁時漏了這欄，結果她把 Donki 記成 SGD 之後
   //    只能刪掉重記（2026-09-08 她回報「手動改幣別改不到」）。
   field('幣別', cur, 'text', (v) => { rc.currency = v; redraw(); },
@@ -2922,28 +2932,18 @@ function renderConfirm() {
       el('span', { className: 'num', textContent: `≈ ${homeM(home)}` })]));
   }
 
-  // ── 實付（2026-09-10 加）──────────────────────────────────
-  // 合計 = 東西值多少（統計、預算、分帳都用這個）
-  // 實付 = 真正離開錢包的錢（點數折抵、商品券、無現金回饋之後）
-  // 兩個一樣時不顯示，免得每張收據都多一行沒有資訊量的東西。
-  if (rc.total != null) {
-    const paid = rc.total - (rc.tenderDiscount || 0);
-    const paidIn = el('input', {
-      type: 'number', inputMode: 'numeric', value: paid,
-      style: 'width:120px;text-align:right',
-    });
-    paidIn.onchange = () => {
-      const v = Number(paidIn.value);
-      // 實付不可能大於合計（那是找零，不是折抵）；填錯就退回合計
-      rc.tenderDiscount = Number.isFinite(v) && v >= 0 && v <= rc.total ? rc.total - v : 0;
-      redraw();
-    };
-    totals.append(el('div', { className: 'sumline' }, [
-      el('span', { textContent: '實付（錢包少掉的）' }), paidIn]));
-    if (rc.tenderDiscount > 0) {
-      totals.append(el('div', { className: 'sub', style: 'text-align:right;margin-top:-4px' },
-        [document.createTextNode(`點數／券折抵 ${amt(rc.tenderDiscount, cur)}，合計不變`)]));
-    }
+  // ── 折抵說明（2026-09-11 改）──────────────────────────────
+  // 9/10 這裡是一個可編輯的「實付」欄位，合計和實付兩個數字並存——她看了對不起來。
+  // 現在合計就是實付（split.js:foldTender），這裡只剩一行字交代「收據印的跟這裡差多少」。
+  if (rc.printedTotal != null && rc.tenderDiscount > 0) {
+    totals.append(el('div', { className: 'sub', style: 'text-align:right;margin-top:-4px' },
+      [document.createTextNode(
+        `收據印 ${amt(rc.printedTotal, cur)}，點數／回饋折抵 ${amt(rc.tenderDiscount, cur)}，已攤進品項`)]));
+  } else if (rc.tenderDiscount > 0 && rc.total != null) {
+    // 9/10 用舊規則存的：合計沒折，錢包另外扣。數字是對的，只是兩邊不一樣。
+    totals.append(el('div', { className: 'sub', style: 'text-align:right;margin-top:-4px' },
+      [document.createTextNode(
+        `舊資料：錢包扣 ${amt(rc.total - rc.tenderDiscount, cur)}（折抵 ${amt(rc.tenderDiscount, cur)}）。刪掉重拍就會統一成一個數字`)]));
   }
   items.append(totals);
   box.append(items);

@@ -190,6 +190,34 @@ export function splitReceipt(receipt = {}) {
   return { ok: true, reason: null, lines: out, residual: fromMinor(residualM, d), adjustedSeq };
 }
 
+/**
+ * 付款端折抵（點數／商品券／無現金回饋）**併進合計**（2026-09-11 她的決定）。
+ *
+ * 9/10 的做法是「合計維持 1,161、錢包另外扣 1,139」——算是對的，
+ * 但列表寫 1,161、錢包少 1,139，她看了對不起來（她說「這樣會很 confuse」）。
+ * 她選的是：**整個 App 只有一個數字**，折抵當成省下來的錢。
+ *
+ * 做法：合計 = 收據印的 − 折抵，折抵併進 priceDiscount 一起攤到品項。
+ * 之後列表、統計、預算、分帳、錢包拿到的全部都是實付，沒有任何地方要再減一次。
+ * 收據原本印的數字留在 `printedTotal`，**只給畫面說明用**，不參與任何計算。
+ *
+ * 折抵不合理（沒合計、≤0、比合計還大）就原樣返回、當作沒有折抵。
+ */
+export function foldTender({ total, priceDiscount = 0, tenderDiscount = 0, currency = 'JPY' }) {
+  const d = decimalsOf(currency);
+  const t = Number(total);
+  const tender = Math.abs(Number(tenderDiscount) || 0);
+  if (total == null || !Number.isFinite(t) || !(tender > 0) || tender > t) {
+    return { total, priceDiscount, printedTotal: null, tenderDiscount: 0 };
+  }
+  return {
+    total: fromMinor(toMinor(t, d) - toMinor(tender, d), d),
+    priceDiscount: fromMinor(toMinor(Math.abs(priceDiscount || 0), d) + toMinor(tender, d), d),
+    printedTotal: t,
+    tenderDiscount: tender,
+  };
+}
+
 /** 整張當一筆——AI 沒讀到品項、或拆出來對不上合計時的退路。 */
 export function fallbackSingleLine(receipt = {}) {
   return [{
@@ -289,10 +317,11 @@ export function toRecords(receipt, lines) {
     reviewed: !!receipt.reviewed,
     reviewReason: receipt.reviewReason || null,
 
-    // 付款端折抵（點數／商品券／無現金回饋）。**只掛第一筆**，理由同 taxRefundPending：
-    // 每一筆都放，錢包會重複扣好幾次。
-    // 它**不改變合計**（東西還是值那麼多），只改變真正離開錢包的錢。
-    tenderDiscount: i === 0 ? (receipt.tenderDiscount ?? null) : null,
+    // 付款端折抵。2026-09-11 起新收據由 foldTender() 攤進 amount 了（有 printedTotal 的就是），
+    // ⛔ 那種**不可以再帶**——wallet.cashOut() 會再扣一次。
+    // 只有 9/10 用舊規則存的收據（合計沒折、沒有 printedTotal）還要帶，**只掛第一筆**：
+    // 不帶的話她重開舊收據存一次，錢包就從扣 1,139 變回扣 1,161。
+    tenderDiscount: i === 0 && receipt.printedTotal == null ? (receipt.tenderDiscount ?? null) : null,
 
     taxRefundPending: i === 0 ? (receipt.taxRefundPending ?? null) : null,
     refundStatus: i === 0 ? (receipt.refundStatus ?? 'none') : 'none',
