@@ -442,6 +442,40 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 
   <!-- 掃描 ------------------------------------------------------------ -->
   <section id="tab-scan" hidden>
+    <!-- 2026-09-11 排列順序改過：拍收據原本放最下面（註解寫「拇指區」），
+         結果被三秒快速記帳擠到第一屏外面（手機上在 804px，tab bar 在 753px）——
+         最常用的按鈕反而要先捲才按得到。**拍照相關的一律放最上面，不要再移回去。**
+         付款人放在拍收據上面：先選誰付，再拍。 -->
+
+    <!-- 拍照與快速記帳都會算在「當下選的付款人」頭上，所以要看得到、改得到 -->
+    <!-- margin-bottom：付款人 chip 原本直接貼著拍收據按鈕，手指一偏就按到另一個（2026-09-11） -->
+    <div id="scanPayerBox" hidden style="margin-bottom:18px">
+      <div class="sub" style="margin:0 0 6px">接下來記的算誰付的</div>
+      <div class="chips" id="scanPayer"></div>
+    </div>
+
+    <input type="file" id="shot" accept="image/*" capture="environment" multiple hidden>
+    <input type="file" id="shotLong" accept="image/*" capture="environment" hidden>
+    <button class="btn primary wide" id="btnShoot" style="min-height:64px;font-size:18px">📷 拍收據（可連拍）</button>
+    <div class="sub" style="text-align:center;margin-top:8px">拍完立刻回到相機，辨識在背景跑</div>
+    <button class="btn wide" id="btnShootLong" style="min-height:56px;margin-top:10px">📄 長收據（一張分多次拍）</button>
+    <div class="sub" style="text-align:center;margin:8px 0 16px">超市那種一張拍不完的，用這個</div>
+
+    <!-- 長收據組合中（2026-09-09）。只有在她按了「長收據」之後才出現。 -->
+    <div class="card" id="longBox" hidden style="border-color:var(--accent)">
+      <div class="row">
+        <strong id="longTitle">長收據組合中</strong>
+        <span class="sub" id="longCount"></span>
+      </div>
+      <div class="sub" style="margin:4px 0 12px">
+        這幾張會當成<strong>同一張收據</strong>送辨識。拍的時候讓上下有一點重疊。
+      </div>
+      <div id="longThumbs" style="display:flex;gap:8px;overflow-x:auto;margin-bottom:12px"></div>
+      <button class="btn wide" id="btnLongMore" style="margin-bottom:8px">＋ 再拍一張</button>
+      <button class="btn wide primary" id="btnLongDone" style="margin-bottom:8px">這張拍完了，送辨識</button>
+      <button class="btn wide danger" id="btnLongCancel">取消（照片不留）</button>
+    </div>
+
     <div id="draftCard"></div>
     <div class="card">
       <div class="row"><strong>辨識佇列</strong><span class="sub" id="qStat">閒置</span></div>
@@ -464,36 +498,6 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       <div class="chips" id="quickPay"></div>
       <button class="btn primary wide" id="btnQuickSave" style="margin-top:12px">記一筆</button>
     </div>
-
-    <!-- 拍照與快速記帳都會算在「當下選的付款人」頭上，所以要看得到、改得到 -->
-    <!-- margin-bottom：付款人 chip 原本直接貼著拍收據按鈕，手指一偏就按到另一個（2026-09-11） -->
-    <div id="scanPayerBox" hidden style="margin-bottom:18px">
-      <div class="sub" style="margin:14px 0 6px">接下來記的算誰付的</div>
-      <div class="chips" id="scanPayer"></div>
-    </div>
-
-    <!-- 長收據組合中（2026-09-09）。只有在她按了「長收據」之後才出現。 -->
-    <div class="card" id="longBox" hidden style="border-color:var(--accent)">
-      <div class="row">
-        <strong id="longTitle">長收據組合中</strong>
-        <span class="sub" id="longCount"></span>
-      </div>
-      <div class="sub" style="margin:4px 0 12px">
-        這幾張會當成<strong>同一張收據</strong>送辨識。拍的時候讓上下有一點重疊。
-      </div>
-      <div id="longThumbs" style="display:flex;gap:8px;overflow-x:auto;margin-bottom:12px"></div>
-      <button class="btn wide" id="btnLongMore" style="margin-bottom:8px">＋ 再拍一張</button>
-      <button class="btn wide primary" id="btnLongDone" style="margin-bottom:8px">這張拍完了，送辨識</button>
-      <button class="btn wide danger" id="btnLongCancel">取消（照片不留）</button>
-    </div>
-
-    <!-- 拍照按鈕放最下面：單手操作，拇指區（§14） -->
-    <input type="file" id="shot" accept="image/*" capture="environment" multiple hidden>
-    <input type="file" id="shotLong" accept="image/*" capture="environment" hidden>
-    <button class="btn primary wide" id="btnShoot" style="min-height:64px;font-size:18px">📷 拍收據（可連拍）</button>
-    <div class="sub" style="text-align:center;margin-top:8px">拍完立刻回到相機，辨識在背景跑</div>
-    <button class="btn wide" id="btnShootLong" style="min-height:56px;margin-top:10px">📄 長收據（一張分多次拍）</button>
-    <div class="sub" style="text-align:center;margin-top:8px">超市那種一張拍不完的，用這個</div>
   </section>
 
     <!-- 確認收據內容（拍完先落地成草稿，她按確認才進統計） ------------------ -->
