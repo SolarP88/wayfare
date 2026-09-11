@@ -4,6 +4,8 @@
 
 **打開就能用：** <https://solarp88.github.io/wayfare/>
 
+📖 **圖文使用說明：** <https://solarp88.github.io/wayfare/guide.html>（第一次用先看這個）
+
 - 資料**只存在你自己的手機裡**，沒有伺服器、沒有帳號、沒有月費
 - 同一個網址，每個人各自一本帳，互不干擾
 - 沒訊號也能拍，有訊號自動補辨識
