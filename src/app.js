@@ -211,15 +211,13 @@ function clearBanners() { $('banners').textContent = ''; }
 // ---------------------------------------------------------------------------
 // Tab
 // ---------------------------------------------------------------------------
+// 下方 6 個 tab ＋ 右上角的 ⚙️ 設定（2026-09-11 設定從下方搬上去：7 個塞 6 格，
+// 設定被擠到第二排，整排變高還蓋住內容）
+const tabButtons = () => document.querySelectorAll('#tabs button, #btnSettings');
+
 function wireTabs() {
-  for (const b of $('tabs').querySelectorAll('button')) {
-    b.onclick = () => {
-      state.tab = b.dataset.tab;
-      for (const x of $('tabs').querySelectorAll('button')) {
-        x.setAttribute('aria-current', String(x === b));
-      }
-      render();
-    };
+  for (const b of tabButtons()) {
+    b.onclick = () => { state.tab = b.dataset.tab; render(); };
   }
 }
 
@@ -227,6 +225,9 @@ function render() {
   for (const name of ['home', 'records', 'scan', 'manual', 'stats', 'settle', 'settings', 'confirm']) {
     $(`tab-${name}`).hidden = name !== state.tab;
   }
+  // 亮哪一個跟著 state.tab 走，不是只在點擊時設——
+  // 從確認頁返回之類的程式切換，也要亮對
+  for (const x of tabButtons()) x.setAttribute('aria-current', String(x.dataset.tab === state.tab));
   renderHeader();
   clearBanners();
   renderWarnings();
@@ -1491,12 +1492,28 @@ function bars(rows, fmt = homeM) {
   return box;
 }
 
-/** 分類色票，跟 index.html 的 .c-* 同一組值。甜甜圈要真的顏色不能吃 CSS 變數。 */
+/**
+ * 甜甜圈的色票。甜甜圈要真的顏色，不能吃 CSS 變數。
+ *
+ * 2026-09-11 換掉（她回報「顏色太接近看不出分類」）。原本那組是柔和灰調，
+ * 餐飲／藥品／購物三個都是橘粉色系；dataviz 驗證器實測：
+ *   彩度 6 色不及格、購物↔門票 正常色覺 ΔE 7.1（要 ≥ 15）→ FAIL。
+ * 現在這組 `validate_palette.js --mode light --pairs all` 全過：
+ *   最接近的一對 綠↔青綠 ΔE 15.6；色盲模擬最差 6.9（圖例有文字標籤，合法）。
+ * ⚠️ 深色模式沒過（藍↔紫太近），靠圖例文字補。
+ * 列表上的類別小標籤（index.html 的 .c-*）是同一組值，改這裡要一起改那邊。
+ *
+ * **顏色跟著「是什麼」走，不跟著排名走**：原本支付方式是按排名輪流給色，
+ * 同一個「現金」這週是藍、下週變綠。現在固定一個付款方式一個顏色。
+ */
 const CAT_COLOR = {
-  餐飲: '#C97F5E', 交通: '#6F93B5', 購物: '#B98098', 門票: '#9887BC',
-  住宿: '#6FA394', 藥品: '#C08181', 其他: '#8C95A3',
+  餐飲: '#e34948', 交通: '#2a78d6', 購物: '#4a3aa7', 門票: '#eda100',
+  住宿: '#1baf7a', 藥品: '#008300', 其他: '#8C95A3',
 };
-const PAY_COLOR = ['#6F93B5', '#5B8464', '#C97F5E', '#B98098', '#9887BC', '#8C95A3'];
+const PAY_COLOR = {
+  現金: '#008300', Wise: '#2a78d6', 信用卡: '#4a3aa7',
+  Suica: '#eda100', PayPay: '#e34948', 其他: '#8C95A3',
+};
 
 /**
  * 甜甜圈。純 SVG，不載任何函式庫（§4：離線也要能看）。
@@ -1562,7 +1579,7 @@ function renderStats() {
   $('chartCat').replaceChildren(note(),
     donut(byCategoryLocal(R, cur), (k) => CAT_COLOR[k] || CAT_COLOR['其他'], f));
   $('chartPay').replaceChildren(
-    donut(byPaymentLocal(R, cur), (k, i) => PAY_COLOR[i % PAY_COLOR.length], f));
+    donut(byPaymentLocal(R, cur), (k) => PAY_COLOR[k] || PAY_COLOR['其他'], f));
   $('chartCity').replaceChildren(bars(byCityLocal(R, cur), f));
 
   const names = new Map((state.settings.payers || []).map((p) => [p.id, p.name || p.id]));

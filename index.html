@@ -77,13 +77,16 @@ img.face{object-fit:cover}
 .p-1{--pc:#527A96}.p-2{--pc:#C9803F}
 /* 類別退到有顏色的小標籤（跟參考 App 同形狀） */
 .catchip{font-size:12px;font-weight:600;border-radius:7px;padding:1.5px 8px;
-         color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent)}
+         color:color-mix(in srgb,var(--c) 55%,var(--ink));background:color-mix(in srgb,var(--c) 15%,transparent)}
 .p-1{background:#527A96}.p-2{background:#C9803F}
 .pdot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;
       vertical-align:-1px}
 
-.c-food{--c:#C97F5E}.c-tran{--c:#6F93B5}.c-shop{--c:#B98098}.c-tick{--c:#9887BC}
-.c-stay{--c:#6FA394}.c-med{--c:#C08181}.c-etc{--c:#8C95A3}
+/* 類別色票（2026-09-11 換，跟 app.js 的 CAT_COLOR 同一組；驗證紀錄寫在那邊）。
+   ⚠️ 標籤的**字**不直接用這個色——黃色字在白底上對比只有 2.2，看不清楚。
+   字一律跟 --ink 混一半（淺色模式變深、深色模式變亮），底色才用純色的 15%。 */
+.c-food{--c:#e34948}.c-tran{--c:#2a78d6}.c-shop{--c:#4a3aa7}.c-tick{--c:#eda100}
+.c-stay{--c:#1baf7a}.c-med{--c:#008300}.c-etc{--c:#8C95A3}
 
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
@@ -99,7 +102,16 @@ body{
 header{
   position:sticky;top:0;z-index:5;background:var(--bg);
   padding:14px 16px 10px;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:10px;
 }
+header > div:first-child{flex:1;min-width:0}
+/* 設定（2026-09-11 從下方 tab bar 搬上來）。出發前設好就很少進去，不佔拇指區 */
+#btnSettings{
+  flex:0 0 auto;width:var(--tap);height:var(--tap);border-radius:14px;border:1px solid transparent;
+  background:transparent;font-size:22px;line-height:1;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+#btnSettings[aria-current="true"]{background:var(--accent-soft);border-color:var(--accent)}
 h1{margin:0;font-size:20px;letter-spacing:.01em}
 main{padding:14px 16px 24px;max-width:720px;margin:0 auto}
 section[hidden]{display:none!important}
@@ -186,7 +198,7 @@ button,select,input,textarea{font:inherit;color:inherit}
 .rec .t{font-size:15.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .meta{display:flex;gap:7px;align-items:center;margin-top:4px;flex-wrap:wrap}
 .tag{font-size:12.5px;padding:2px 8px;border-radius:7px;font-weight:600;
-     color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent)}
+     color:color-mix(in srgb,var(--c) 55%,var(--ink));background:color-mix(in srgb,var(--c) 15%,transparent)}
 .dim{font-size:13px;color:var(--muted)}
 .amt{text-align:right;flex:0 0 auto}
 .amt .a{font-size:16.5px;font-weight:700}
@@ -228,7 +240,13 @@ button,select,input,textarea{font:inherit;color:inherit}
   min-height:46px;padding:0 14px;border-radius:13px;border:1px solid var(--line);
   background:var(--card);display:inline-flex;align-items:center;cursor:pointer;font-size:14.5px;
 }
-.chip[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+/* 選中的選項：淺藍底＋藍框＋藍字（2026-09-11 改）。
+   原本是實心藍，跟「拍收據」這種實心按鈕長一樣，付款人 chip 又貼著拍收據按鈕，
+   她每次都誤觸。**實心只留給動作按鈕**，選項一律是淺底——一眼分得出哪個按了會「做事」。 */
+.chip[aria-pressed="true"]{
+  background:var(--accent-soft);color:var(--accent);border-color:var(--accent);font-weight:700;
+  box-shadow:inset 0 0 0 1px var(--accent);   /* 框看起來 2px，但不改寬度，選的時候不會跳 */
+}
 
 /* 份數：一個人一列，加減鍵 52px（§14 戴手套單手） */
 .wrow{display:flex;align-items:center;gap:10px;padding:4px 0}
@@ -300,8 +318,11 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 <body>
 
 <header>
-  <h1 id="title">旅行記帳</h1>
-  <div class="muted" id="subtitle">載入中…</div>
+  <div>
+    <h1 id="title">旅行記帳</h1>
+    <div class="muted" id="subtitle">載入中…</div>
+  </div>
+  <button id="btnSettings" data-tab="settings" aria-label="設定">⚙️</button>
 </header>
 
 <main>
@@ -445,7 +466,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
     </div>
 
     <!-- 拍照與快速記帳都會算在「當下選的付款人」頭上，所以要看得到、改得到 -->
-    <div id="scanPayerBox" hidden>
+    <!-- margin-bottom：付款人 chip 原本直接貼著拍收據按鈕，手指一偏就按到另一個（2026-09-11） -->
+    <div id="scanPayerBox" hidden style="margin-bottom:18px">
       <div class="sub" style="margin:14px 0 6px">接下來記的算誰付的</div>
       <div class="chips" id="scanPayer"></div>
     </div>
@@ -580,7 +602,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
   <button data-tab="manual"><b>✏️</b>手動</button>
   <button data-tab="stats"><b>📊</b>統計</button>
   <button data-tab="settle"><b>🤝</b>分帳</button>
-  <button data-tab="settings"><b>⚙️</b>設定</button>
+  <!-- 設定在右上角 #btnSettings。這裡要剛好 6 個，對上 nav 的 repeat(6,1fr)；
+       多一個就會被擠到第二排（2026-09-11 她回報的就是這個） -->
 </nav>
 
 <dialog id="dlg">
