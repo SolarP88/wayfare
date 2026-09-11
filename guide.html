@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F6F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#131519" media="(prefers-color-scheme: dark)">
+<title>wayfare 使用說明</title>
+<!--
+  給同行隊員看的使用說明（2026-09-11）。
+  截圖全部是假資料，由 tools/shoot_guide.mjs 自動產生：
+    本機開 http://localhost:8765 → node tools/shoot_guide.mjs guide
+  App 畫面改了就重跑那支，不要手動截。
+  配色跟 index.html 同一組 token，App 換色要一起換。
+-->
+<style>
+:root{
+  --bg:#F6F4F1; --card:#FFFFFF; --sunk:#F1EEEA;
+  --ink:#20242B; --ink2:#3D444F; --muted:#616A78; --line:#E4E0DB;
+  --accent:#527A96; --accent-soft:#E2EAF0;
+  --warn:#9A6412; --warn-soft:#F6ECDD; --good:#2F7A55;
+  --radius:18px;
+  --shadow:0 1px 2px rgba(23,25,30,.04), 0 6px 18px rgba(23,25,30,.06);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#131519; --card:#1C1F25; --sunk:#22262D;
+    --ink:#F1F2F5; --ink2:#D3D7DE; --muted:#9DA6B4; --line:#2C313A;
+    --accent:#86B2CF; --accent-soft:#1F2A33;
+    --warn:#E0A94A; --warn-soft:#2A2418; --good:#5FC48D;
+    --shadow:0 1px 2px rgba(0,0,0,.25), 0 6px 18px rgba(0,0,0,.22);
+  }
+}
+:root[data-theme="dark"]{
+    --bg:#131519; --card:#1C1F25; --sunk:#22262D;
+    --ink:#F1F2F5; --ink2:#D3D7DE; --muted:#9DA6B4; --line:#2C313A;
+    --accent:#86B2CF; --accent-soft:#1F2A33;
+    --warn:#E0A94A; --warn-soft:#2A2418; --good:#5FC48D;
+    --shadow:0 1px 2px rgba(0,0,0,.25), 0 6px 18px rgba(0,0,0,.22);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:70px}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","PingFang TC",sans-serif;
+  -webkit-text-size-adjust:100%;
+}
+a{color:var(--accent)}
+.top{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);
+     padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.top b{font-size:17px}
+.top a{font-weight:600;text-decoration:none;min-height:44px;display:inline-flex;align-items:center;
+       padding:0 14px;border:1px solid var(--line);border-radius:13px;background:var(--card)}
+main{max-width:680px;margin:0 auto;padding:18px 16px 60px}
+.hero{padding:10px 2px 8px}
+.hero h1{font-size:27px;line-height:1.3;margin:0 0 8px;letter-spacing:-.01em}
+.hero p{margin:0;color:var(--ink2)}
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 6px}
+.pills a{font-size:14px;font-weight:600;text-decoration:none;padding:7px 12px;border-radius:11px;
+         background:var(--card);border:1px solid var(--line);color:var(--ink2)}
+section{margin-top:34px}
+h2{font-size:21px;margin:0 0 4px;display:flex;align-items:center;gap:10px}
+h2 .n{flex:0 0 auto;width:30px;height:30px;border-radius:10px;background:var(--accent);color:#fff;
+      font-size:15px;display:inline-grid;place-items:center}
+:root[data-theme="dark"] h2 .n{color:#131519}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) h2 .n{color:#131519}}
+h3{font-size:17px;margin:22px 0 6px}
+.lead{color:var(--muted);margin:0 0 14px;font-size:15px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+      box-shadow:var(--shadow);padding:16px 18px;margin:12px 0}
+ol.steps{list-style:none;counter-reset:s;padding:0;margin:10px 0}
+ol.steps>li{counter-increment:s;position:relative;padding:0 0 12px 40px}
+ol.steps>li::before{content:counter(s);position:absolute;left:0;top:1px;width:27px;height:27px;border-radius:50%;
+      border:2px solid var(--accent);color:var(--accent);font-weight:700;font-size:14px;
+      display:grid;place-items:center;line-height:1}
+.btnlike{display:inline-block;font-weight:700;font-size:14.5px;padding:0 8px;border-radius:7px;
+         background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+figure{margin:16px auto 6px;max-width:300px}
+figure a{display:block}
+figure img{display:block;width:100%;height:auto;border-radius:26px;border:6px solid var(--ink);
+           box-shadow:var(--shadow);background:var(--sunk)}
+figcaption{font-size:13.5px;color:var(--muted);text-align:center;margin-top:8px;line-height:1.5}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.pair figure{max-width:none;margin:14px 0 4px}
+.pair figure img{border-width:4px;border-radius:18px}
+.tip,.warn{border-radius:14px;padding:12px 14px;margin:14px 0;font-size:15px}
+.tip{background:var(--accent-soft)}
+.warn{background:var(--warn-soft)}
+.tip b:first-child,.warn b:first-child{display:block;margin-bottom:2px}
+.warn b:first-child{color:var(--warn)}
+.table{overflow-x:auto;margin:12px 0}
+table{border-collapse:collapse;width:100%;font-size:15px;background:var(--card);
+      border-radius:14px;overflow:hidden;border:1px solid var(--line)}
+th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--line)}
+th{background:var(--sunk);font-size:14px;color:var(--ink2)}
+tr:last-child td{border-bottom:0}
+ul.plain{padding-left:20px;margin:8px 0}
+ul.plain li{margin:4px 0}
+.foot{margin-top:40px;color:var(--muted);font-size:13.5px;text-align:center}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <b>📖 使用說明</b>
+  <a href="./">← 回到 App</a>
+</div>
+
+<main>
+
+<div class="hero">
+  <h1>wayfare 旅行記帳</h1>
+  <p>拍收據就記好帳：金額、店名、稅自動讀出來，現金錢包自動扣，回國一鍵算出誰要還你多少。</p>
+  <div class="pills">
+    <a href="#start">開始前</a><a href="#home">首頁</a><a href="#scan">拍收據</a>
+    <a href="#confirm">確認</a><a href="#long">長收據</a><a href="#nobill">沒收據</a>
+    <a href="#records">紀錄</a><a href="#stats">統計</a><a href="#settle">分帳</a>
+    <a href="#faq">常見誤會</a><a href="#help">出問題</a><a href="#back">回國後</a>
+  </div>
+</div>
+
+<div class="tip">
+  <b>先知道這三件事</b>
+  <ul class="plain" style="margin:4px 0 0">
+    <li>資料<strong>只存在你自己的手機裡</strong>，沒有帳號、沒有伺服器</li>
+    <li>同一個網址，每個人各記各的帳，互不干擾</li>
+    <li>沒訊號也照樣拍，有訊號會自動補辨識</li>
+  </ul>
+</div>
+
+<!-- ─────────────────────────────────────────── -->
+<section id="start">
+  <h2><span class="n">1</span>開始前（出發前做一次）</h2>
+  <p class="lead">大約 10 分鐘。三件事做完就能用。截圖都可以點開放大。</p>
+
+  <h3>① 申請自己的 Gemini API key（免費）</h3>
+  <ol class="steps">
+    <li>打開 <a href="https://aistudio.google.com/apikey" rel="noopener">aistudio.google.com/apikey</a>，用 Google 帳號登入</li>
+    <li>按 <span class="btnlike">Create API key</span>，把那一串字複製起來</li>
+  </ol>
+  <div class="warn">
+    <b>每個人一定要用自己的 key</b>
+    辨識的額度是綁在 key 上的，共用一把會互相吃掉額度，拍到一半就不能辨識了。
+  </div>
+
+  <h3>② 加到主畫面</h3>
+  <ul class="plain">
+    <li><strong>iPhone</strong>：用 Safari 打開網址 → 下方「分享」→ <span class="btnlike">加入主畫面</span></li>
+    <li><strong>Android</strong>：用 Chrome 打開 → 右上角 ⋮ → <span class="btnlike">安裝應用程式</span></li>
+  </ul>
+  <p>之後從桌面的圖示打開，就是全螢幕的 App，沒有網址列。</p>
+
+  <h3>③ 填設定</h3>
+  <p>按右上角的 <span class="btnlike">⚙️</span> 進設定，由上往下填：</p>
+  <div class="pair">
+    <figure><a href="guide/13-settings.jpg"><img src="guide/13-settings.jpg" alt="設定頁上半部：行程名稱、幣別、日期" loading="lazy" width="750" height="1624"></a>
+      <figcaption>右上角 ⚙️ 就是設定</figcaption></figure>
+    <figure><a href="guide/14-checklist.jpg"><img src="guide/14-checklist.jpg" alt="出發前檢查清單，每一項打勾" loading="lazy" width="750" height="1624"></a>
+      <figcaption>最下面的檢查清單全打勾就好了</figcaption></figure>
+  </div>
+  <div class="table"><table>
+    <tr><th>欄位</th><th>怎麼填</th></tr>
+    <tr><td>行程名稱</td><td>顯示在首頁最上面，例如「北海道 9 日」</td></tr>
+    <tr><td>本位幣／當地幣別</td><td>新加坡人選 <b>SGD</b>，去日本選 <b>JPY</b></td></tr>
+    <tr><td>行程首日／末日</td><td>出發和回程的日期</td></tr>
+    <tr><td>總預算</td><td>這趟打算花多少（用本位幣）。App 會自動除以天數</td></tr>
+    <tr><td><b>匯率</b></td><td>現金、刷卡、Wise 各填一個。<b>現金匯率填你換錢時實際拿到的</b>，1 新幣換到多少日圓</td></tr>
+    <tr><td>付款人與現金</td><td>你的名字、出發時帶多少日圓現金、Wise 裡有多少日圓</td></tr>
+    <tr><td>同行者</td><td>一起分帳的人，只要填名字（不用管他的錢包）</td></tr>
+    <tr><td>行程</td><td>哪幾天在哪個城市。GPS 抓不到時靠它判斷城市</td></tr>
+    <tr><td>API key</td><td>貼上第 ① 步複製的那一串</td></tr>
+  </table></div>
+  <div class="tip">
+    <b>為什麼匯率要自己填？</b>
+    換現金、刷卡、Wise 的成本都不一樣。用你真正付的匯率算出來的，才是你真的花掉的錢。
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────── -->
+<section id="home">
+  <h2><span class="n">2</span>首頁：一眼看今天的狀況</h2>
+  <div class="pair">
+    <figure><a href="guide/01-home.jpg"><img src="guide/01-home.jpg" alt="首頁上半部：今天還能花、今日支出、旅程累計、預算進度" loading="lazy" width="750" height="1624"></a>
+      <figcaption>今天還能花多少、花了多少</figcaption></figure>
+    <figure><a href="guide/02-wallet.jpg"><img src="guide/02-wallet.jpg" alt="首頁的現金錢包與 Wise 卡" loading="lazy" width="750" height="1624"></a>
+      <figcaption>往下捲是錢包</figcaption></figure>
+  </div>
+  <ul class="plain">
+    <li><strong>今天還能花</strong>：剩下的預算 ÷ 剩下的天數，再扣掉今天已經花的</li>
+    <li><strong>現金錢包</strong>：錢包裡應該還剩多少日圓。下面會寫「照目前速度還能撐幾天」</li>
+    <li>去 ATM 領錢之後按 <span class="btnlike">補充現金</span>；Wise 加值就按 <span class="btnlike">儲值 Wise</span></li>
+    <li>數了錢包發現對不上，按 <span class="btnlike">校正餘額</span>，把實際的數字填進去就好</li>
+  </ul>
+</section>
+
+<!-- ─────────────────────────────────────────── -->
+<section id="scan">
+  <h2><span class="n">3</span>拍收據</h2>
+  <p class="lead">最常用的功能。拍完就可以走，辨識在背景跑。</p>
+  <div class="pair">
+    <figure><a href="guide/03-scan.jpg"><img src="guide/03-scan.jpg" alt="掃描頁：選付款人、拍收據按鈕、長收據按鈕" loading="lazy" width="750" height="1624"></a>
+      <figcaption>下面點 📷 掃描</figcaption></figure>
+    <figure><a href="guide/04-draft.jpg"><img src="guide/04-draft.jpg" alt="辨識完的收據出現在「待確認」" loading="lazy" width="750" height="1624"></a>
+      <figcaption>辨識完先放在「待確認」</figcaption></figure>
+  </div>
+  <ol class="steps">
+    <li>先選 <strong>「接下來記的算誰付的」</strong>（只有一個付款人就不會出現這一排）</li>
+    <li>按 <span class="btnlike">📷 拍收據（可連拍）</span>，拍完立刻回到相機，可以一直拍下一張</li>
+    <li>辨識好的收據會出現在 <strong>待確認</strong>。有空的時候（等車、回飯店）再一張一張按 <span class="btnlike">確認</span></li>
+  </ol>
+  <div class="tip">
+    <b>還沒確認的收據不會算進去</b>
+    統計和錢包只算你確認過的，所以數字永遠是你看過的。
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────── -->
+<section id="confirm">
+  <h2><span class="n">4</span>確認收據（順便分帳）</h2>
+  <p class="lead">看一下 AI 讀得對不對，順便選這張誰有份。</p>
+  <div class="pair">
+    <figure><a href="guide/05-confirm-top.jpg"><img src="guide/05-confirm-top.jpg" alt="確認頁上半部：店名、日期、合計、類別、支付方式" loading="lazy" width="750" height="1624"></a>
+      <figcaption>店名、合計、類別、怎麼付的</figcaption></figure>
+    <figure><a href="guide/05b-shares.jpg"><img src="guide/05b-shares.jpg" alt="這張誰有份：選人、全部都有份、份數" loading="lazy" width="750" height="1624"></a>
+      <figcaption>這張誰有份</figcaption></figure>
+  </div>
+  <ol class="steps">
+    <li>對一下 <strong>店名、合計、類別、支付方式</strong>，錯了直接點欄位改</li>
+    <li><strong>這張誰有份</strong>：選了幾個人就平分成幾份。按 <span class="btnlike">全部都有份</span> 最快；什麼都不選 ＝ 全部算付款人自己的</li>
+    <li>有人吃比較多？按 <span class="btnlike">⚖️ 份數</span>，讓他算兩份</li>
+    <li>一張收據裡混了不同人的東西？往下到 <strong>購買明細</strong>，那一行單獨選人</li>
+    <li>最下面顯示 <strong>「✓ 品項加總 = 合計」</strong> 才能存，按 <span class="btnlike">確認儲存</span></li>
+  </ol>
+  <figure><a href="guide/06-confirm-bottom.jpg"><img src="guide/06-confirm-bottom.jpg" alt="確認頁下半部：品項加總等於合計，點數折抵說明" loading="lazy" width="750" height="1624"></a>
+    <figcaption>品項加總要跟合計一樣才能存</figcaption></figure>
+  <div class="tip">
+    <b>收據上有點數折抵、無現金回饋？</b>
+    例如收據印 ¥1,161，無現金回饋 −¥22，你實際付 ¥1,139。
+    App 會直接用 <strong>¥1,139</strong>，列表、統計、錢包、分帳全部都是這個數字，
+    確認頁下面會寫一行「收據印 ¥1,161，折抵 ¥22」讓你對得起來。
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────── -->
+<section id="long">
+  <h2><span class="n">5</span>長收據（一張拍不完）</h2>
+  <p class="lead">超市、藥妝店那種很長的收據，分幾段拍，最後合成一張。</p>
+  <figure><a href="guide/07-long.jpg"><img src="guide/07-long.jpg" alt="長收據組合中：兩張縮圖、再拍一張、送辨識" loading="lazy" width="750" height="1624"></a>
+    <figcaption>拍好的每一段都會排在這裡</figcaption></figure>
+  <ol class="steps">
+    <li>按 <span class="btnlike">📄 長收據（一張分多次拍）</span></li>
+    <li>從上往下分段拍，<strong>每段上下重疊一點點</strong>。按 <span class="btnlike">＋ 再拍一張</span> 繼續</li>
+    <li>拍壞的那張按右上角 ✕ 刪掉，編號會自己重排</li>
+    <li>拍完按 <span class="btnlike">這 N 張拍完了，送辨識</span>，只會出一張收據</li>
+  </ol>
+  <div class="warn">
+    <b>第一張拍完要等幾秒</b>
+    第一次會先抓 GPS 位置，最久大約 8 秒，不是當機。
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────── -->
+<section id="nobill">
+  <h2><span class="n">6</span>沒有收據的花費</h2>
+  <div class="pair">
+    <figure><a href="guide/08-quick.jpg"><img src="guide/08-quick.jpg" alt="三秒快速記帳：金額按鈕、類別、付款方式" loading="lazy" width="750" height="1624"></a>
+      <figcaption>販賣機、公車：三秒快速記帳</figcaption></figure>
+    <figure><a href="guide/12-manual.jpg"><img src="guide/12-manual.jpg" alt="手動輸入頁：日期、項目、金額、幣別" loading="lazy" width="750" height="1624"></a>
+      <figcaption>機票、住宿：手動</figcaption></figure>
+  </div>
+  <h3>販賣機、置物櫃、公車、神社香油錢</h3>
+  <p>掃描頁往下捲到 <strong>三秒快速記帳</strong>：點金額（或自己打）→ 選類別 → 選怎麼付的 → <span class="btnlike">記一筆</span>。</p>
+  <h3>機票、住宿這種出發前就付的</h3>
+  <p>點下面的 <span class="btnlike">✏️ 手動</span>。日期早於行程首日的，會自動歸成「行前」，不會把每日預算撐爆。</p>
+  <div class="tip">
+    <b>用新幣現金付的不會扣日圓錢包</b>
+    錢包裡裝的是日圓現金。在新加坡用新幣付的機票，幣別選 SGD 就不會動到日圓錢包。
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────── -->
+<section id="records">
+  <h2><span class="n">7</span>紀錄：找、改、刪</h2>
+  <figure><a href="guide/09-records.jpg"><img src="guide/09-records.jpg" alt="紀錄頁：按日期分組的每一筆花費" loading="lazy" width="750" height="1624"></a>
+    <figcaption>每一筆都在這裡，點進去可以改</figcaption></figure>
+  <ul class="plain">
+    <li>最上面可以 <strong>搜尋</strong>（店名、品項、備註），也可以用類別、付款方式、人來篩選</li>
+    <li><span class="btnlike">按日期</span> ／ <span class="btnlike">按類別</span> 切換排法</li>
+    <li>點任何一筆就回到確認頁，可以改、也可以刪</li>
+    <li>刪錯了？按 <span class="btnlike">最近刪除</span> 救回來</li>
+  </ul>
+</section>
+
+<!-- ─────────────────────────────────────────── -->
+<section id="stats">
+  <h2><span class="n">8</span>統計</h2>
+  <figure><a href="guide/10-stats.jpg"><img src="guide/10-stats.jpg" alt="統計頁：分類支出與支付方式的圓餅圖、每日趨勢" loading="lazy" width="750" height="1624"></a>
+    <figcaption>錢都花到哪裡去了</figcaption></figure>
+  <p>分類、支付方式、每天花多少、在哪個城市花的、每個付款人花多少、花最多的前十筆，全部在這一頁。</p>
+  <p><strong>待退稅累計</strong>是免稅購物還沒退回來的稅，要到機場才退得到，是「應收」，不是已經省下來的錢。</p>
+</section>
+
+<!-- ─────────────────────────────────────────── -->
+<section id="settle">
+  <h2><span class="n">9</span>分帳：誰要還你多少</h2>
+  <figure><a href="guide/11-settle.jpg"><img src="guide/11-settle.jpg" alt="分帳頁：我這趟真正的花費、每個人要還我多少" loading="lazy" width="750" height="1624"></a>
+    <figcaption>確認收據時選的「誰有份」都算在這裡</figcaption></figure>
+  <ul class="plain">
+    <li><strong>我這趟真正的花費</strong>：扣掉你幫別人墊的，才是你自己花的</li>
+    <li>下面每個人一張卡，寫著他要還你多少</li>
+    <li>收到錢了，按 <span class="btnlike">○○ 還我了</span>，填收到多少（可以只還一部分），他的欠款就會扣掉</li>
+    <li>反過來是你欠別人的，按鈕會寫 <span class="btnlike">我還 ○○ 了</span></li>
+  </ul>
+  <div class="tip">
+    <b>分帳頁是空的？</b>
+    代表確認收據時都沒有選「這張誰有份」。回到紀錄點進那一筆，補選就會算出來。
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────── -->
+<section id="faq">
+  <h2><span class="n">10</span>容易誤會的地方</h2>
+  <div class="table"><table>
+    <tr><th>你可能以為</th><th>其實</th></tr>
+    <tr><td>Suica 儲值 ¥5,000 是一筆花費</td><td><b>不是。</b>錢只是從錢包換到卡裡。會扣現金錢包，但不算花費，不然之後用卡買東西會算兩次</td></tr>
+    <tr><td>免稅買東西，當場就省了稅</td><td><b>不是。</b>日本 2026-11-01 起改新制，店裡付的是含稅價，稅要離境時在機場退</td></tr>
+    <tr><td>紀錄上的金額跟收據印的不一樣</td><td>收據上有點數折抵、無現金回饋的話，App 記的是你<b>實際付的</b>。確認頁會寫差多少</td></tr>
+    <tr><td>金額下面那個小字</td><td>換算成新幣的參考值，用你設定的匯率算的</td></tr>
+    <tr><td>沒花錢那天怎麼不見了</td><td>有，是 ¥0。每日趨勢每一天都會列出來</td></tr>
+  </table></div>
+</section>
+
+<!-- ─────────────────────────────────────────── -->
+<section id="help">
+  <h2><span class="n">11</span>出問題的時候</h2>
+  <div class="table"><table>
+    <tr><th>狀況</th><th>怎麼辦</th></tr>
+    <tr><td>最上面出現「有新版本可以更新」</td><td>點它就好，會重新整理一次。<b>確認頁改到一半的先存起來再點</b></td></tr>
+    <tr><td>下面那排按鈕浮到畫面中間</td><td>iPhone 偶爾會這樣。把 App 完全關掉（從底部往上滑、把它滑掉）再打開</td></tr>
+    <tr><td>拍了一直在排隊</td><td>多半是沒訊號。回到有訊號的地方會自己繼續</td></tr>
+    <tr><td>一直顯示「失敗」</td><td>檢查設定裡的 API key；或是當天額度用完了（每天日本時間下午 5 點左右重置）</td></tr>
+    <tr><td>金額都顯示「—」</td><td>匯率沒填，去設定補上</td></tr>
+    <tr><td>城市空白或不對</td><td>GPS 沒抓到。在設定把「行程」填完整，或點進那一筆手動改</td></tr>
+    <tr><td>一次拍很多張跑很慢</td><td>正常，每分鐘只送 15 張，避免撞到 Google 的上限</td></tr>
+  </table></div>
+</section>
+
+<!-- ─────────────────────────────────────────── -->
+<section id="back">
+  <h2><span class="n">12</span>回國之後</h2>
+  <p>設定頁最下面的 <strong>匯出與備份</strong>：</p>
+  <ul class="plain">
+    <li><span class="btnlike">匯出 Excel</span>：一頁明細、一頁統計，拿去對帳、報帳</li>
+    <li><span class="btnlike">備份（含照片）</span>：整本帳連收據照片存成一個檔，換手機可以用 <span class="btnlike">還原備份</span> 救回來</li>
+  </ul>
+  <div class="warn">
+    <b>回國後盡快匯出</b>
+    資料只在手機裡。iPhone 對很久沒打開的網站會自動清掉資料，旅行期間天天在用沒關係，回國後別放著。
+  </div>
+  <h3>隱私</h3>
+  <ul class="plain">
+    <li>收據照片、金額、位置，全部存在你自己的手機，沒有上傳到任何伺服器</li>
+    <li>只有辨識的那一刻，照片會送去 Google Gemini 讀，讀完就沒了</li>
+    <li>API key 只存在你的手機，不會進備份檔</li>
+  </ul>
+</section>
+
+<p class="foot">畫面上的名字和金額都是示範用的假資料。<br><a href="./">← 回到 App</a></p>
+
+</main>
+</body>
+</html>
