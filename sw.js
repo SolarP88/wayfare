@@ -21,8 +21,8 @@
 
 /* deploy.sh 會把這行換成當次檔案內容的雜湊。
    換一個版本號 = 換一個 cache 名字 = 手機下次連上網就會抓到新版。
-   本機直接開檔時就維持 a4240adf3f74，不影響功能。 */
-const VERSION = 'a4240adf3f74';
+   本機直接開檔時就維持 67c717dd04f1，不影響功能。 */
+const VERSION = '67c717dd04f1';
 const CACHE = `wayfare-${VERSION}`;
 
 /* 版本號還是佔位符 = 這份沒有經過 deploy.sh = **本機開發中**。
@@ -129,6 +129,20 @@ self.addEventListener('fetch', (e) => {
        離線時網路一定失敗，所以先給快取裡的 index.html —— 這一行就是
        「沒訊號點開圖示不再是白畫面」的關鍵。 */
     if (req.mode === 'navigate') {
+      /* ⛔ 只有「開 App 本身」才給快取的 index.html。
+         2026-09-11 踩到：這裡原本對**所有**導覽都回 index.html，
+         於是點設定頁的「使用說明」（guide.html）打開的還是 App——她說「開不了」。
+         本機開發模式走網路優先所以測不出來，只有線上（版本戳蓋過）才會中。
+         其他頁面一律網路優先；沒訊號時看過的給快取、沒看過的講清楚。 */
+      const last = url.pathname.split('/').pop();
+      const isAppShell = last === '' || last === 'index.html';
+      if (!isAppShell) {
+        try { return await fetchAndCache(req); } catch {
+          return (await caches.match(req, { cacheName: CACHE }))
+            || new Response('離線，而且這一頁還沒存下來。回到有訊號的地方再打開一次，之後沒訊號也看得到。',
+              { status: 504, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+        }
+      }
       if (DEV) {
         try { return await fetchAndCache(req); } catch { /* 沒網路就往下走快取 */ }
       }
